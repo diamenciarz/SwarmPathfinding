@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swarmpathfinding"
+version = "0.1.0"
+description = "Pathfinding research lab: grids, polygons, swarms, fog of war."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pygame>=2.5",
+    "pymunk>=6.6",
+    "shapely>=2.0",
+    "matplotlib>=3.7",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "jupyter>=1.0", "ipykernel>=6.0"]
+notebook = ["jupyter>=1.0", "ipykernel>=6.0"]
+
+[project.scripts]
+swarmpath = "swarmpathfinding.viz.live:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
