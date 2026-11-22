@@ -135,3 +135,35 @@ def test_resize_keeps_zoom():
     app.draw()
     assert app.camera.zoom == zoom
     assert app.panel.rect.right == 1000
+
+
+def test_half_visible_obstacle_keeps_its_hidden_part_drawn():
+    """An obstacle that sticks out of view must stay drawn (dimmed) outside the
+    vision circle, not get cut off at its edge."""
+    from shapely.geometry import box
+
+    from swarmpathfinding.worlds.continuous import PolygonObstacle
+
+    app = LiveApp(
+        LabSettings(world_kind="continuous", map_kind="sparse", fow=True, n_agents=1, vision_radius=4.0)
+    )
+    world = app.scenario.world
+    world.obstacles = [PolygonObstacle(id="wall", polygon=box(20.0, 10.0, 30.0, 12.0))]
+    world.invalidate()
+    app._sync_physics()
+    agent = app.scenario.agents[0]
+    agent.pos = Vec2(20.0, 16.0)  # sees the left end of the wall only
+    if agent.body is not None:
+        agent.body.position = (20.0, 16.0)
+    app.scenario.belief.obstacles.clear()
+    app._reveal()
+    assert "wall" in app.seen_ids
+    remembered, ghosts = app._fog_memory()
+    assert [r.id for r in remembered] == ["wall"] and not ghosts
+
+    app.draw()
+    hidden = app.camera.world_to_screen(Vec2(28.0, 11.0))  # far end, out of view
+    floor = app.camera.world_to_screen(Vec2(28.0, 14.0))  # out of view, no wall
+    wall_px = app.screen.get_at(hidden)[:3]
+    floor_px = app.screen.get_at(floor)[:3]
+    assert sum(wall_px) > sum(floor_px) + 30

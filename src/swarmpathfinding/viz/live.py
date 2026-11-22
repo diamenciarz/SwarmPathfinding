@@ -555,14 +555,13 @@ class LiveApp:
             else:
                 draw_grid(world_surface, self.camera, world)
         elif fow:
-            # Under fog: memory first, fog over it, then what is in view right now.
-            unseen = [r for r in sc.belief.obstacles.values() if r.id not in self.seen_ids]
+            # Under fog: fog, then remembered obstacle shapes (dimmed), then what is in view now.
+            remembered, ghost_ids = self._fog_memory()
             draw_floor(world_surface, self.camera, world)
-            draw_remembered(world_surface, self.camera, [r for r in unseen if r.velocity.length_sq() == 0.0])
             draw_fog_raster(world_surface, self.camera, sc.belief, self.visible)
+            draw_remembered(world_surface, self.camera, remembered)
             draw_visible_truth(world_surface, self.camera, world, self.union)
-            moving = {r.id for r in unseen if r.velocity.length_sq() > 0.0}
-            draw_ghosts(world_surface, self.camera, [g for g in sc.belief.ghost_obstacles(self.now) if g.id in moving])
+            draw_ghosts(world_surface, self.camera, [g for g in sc.belief.ghost_obstacles(self.now) if g.id in ghost_ids])
         else:
             draw_polygons(world_surface, self.camera, world)
         if vals["show_search"] and focus is not None and "closed" in focus.extra:
@@ -586,6 +585,25 @@ class LiveApp:
         self._metrics()
         self.panel.draw(self.screen)
         pygame.display.flip()
+
+    def _fog_memory(self) -> tuple[list[ObstacleRecord], set[str]]:
+        """Split the remembered obstacles for drawing under fog.
+
+        Returns (records drawn as remembered walls, ids drawn as moving ghosts).
+        Every obstacle in view is included in the first list too, so the part of
+        a half-visible obstacle that sticks out of view stays drawn (dimmed by the
+        fog) instead of being cut off. Movers out of view are ghosts instead.
+        """
+        sc = self.scenario
+        assert sc is not None
+        remembered: list[ObstacleRecord] = []
+        ghost_ids: set[str] = set()
+        for rec in sc.belief.obstacles.values():
+            if rec.id not in self.seen_ids and rec.velocity.length_sq() > 0.0:
+                ghost_ids.add(rec.id)
+            else:
+                remembered.append(rec)
+        return remembered, ghost_ids
 
     def _draw_pending(self, surface: pygame.Surface) -> None:
         sc = self.scenario
