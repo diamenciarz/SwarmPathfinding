@@ -31,11 +31,16 @@ class Cycle:
     section: str = ""
     visible: bool = True
     enabled: bool = True
+    display: dict[str, str] = field(default_factory=dict)  # option -> shown text
     rect: pygame.Rect = field(default_factory=lambda: pygame.Rect(0, 0, 0, 0))
 
     @property
     def value(self) -> str:
         return self.options[self.index]
+
+    @property
+    def shown(self) -> str:
+        return self.display.get(self.value, self.value)
 
     def cycle(self, step: int = 1) -> None:
         self.index = (self.index + step) % len(self.options)
@@ -238,7 +243,7 @@ class SidePanel:
         color = BUTTON_DISABLED if not c.enabled else (BUTTON_HOT if hot else BUTTON)
         pygame.draw.rect(surface, color, c.rect, border_radius=4)
         fg = PANEL_FG if c.enabled else PANEL_MUTED
-        self._blit_center(surface, c.value, c.rect, self.small, fg)
+        self._blit_center(surface, c.shown, c.rect, self.small, fg)
         self._arrow(surface, c.rect.x + 9, c.rect.centery, -1, fg)
         self._arrow(surface, c.rect.right - 9, c.rect.centery, 1, fg)
         return y + ROW_CYCLE

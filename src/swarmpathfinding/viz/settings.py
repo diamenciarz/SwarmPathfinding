@@ -22,6 +22,8 @@ class LabSettings:
     seed: int = 1
     fow: bool = True
     los: bool = True
+    changes: str = "none"
+    edit_at: float = 3.0
     show_search: bool = False
 
     @classmethod
@@ -37,6 +39,7 @@ class LabSettings:
             vision_radius=spec.vision_radius,
             seed=spec.seed if spec.seed else 1,
             fow=spec.fow,
+            changes="slow_edit" if spec.slow_edit else "none",
         )
 
 
@@ -112,6 +115,8 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--fow", dest="fow", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--los", dest="los", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--changes", choices=("none", "slow_edit"), default=None)
+    parser.add_argument("--edit-at", dest="edit_at", type=float, default=None)
     parser.add_argument(
         "--show-search", dest="show_search", action=argparse.BooleanOptionalAction, default=None
     )
@@ -143,6 +148,8 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
         "seed",
         "fow",
         "los",
+        "changes",
+        "edit_at",
         "show_search",
     ):
         value = getattr(args, name)
@@ -171,6 +178,8 @@ def apply_settings(panel: SidePanel, settings: LabSettings) -> None:
     _set_check(panel, "fow", settings.fow)
     _set_check(panel, "los", settings.los)
     _set_check(panel, "show_search", settings.show_search)
+    if any(w.key == "changes" for w in panel.widgets):
+        _set_cycle(panel, "changes", settings.changes)
 
 
 def _set_cycle(panel: SidePanel, key: str, value: str) -> None:

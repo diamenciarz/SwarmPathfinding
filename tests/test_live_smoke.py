@@ -42,7 +42,7 @@ def test_agents_reach_goal_on_grid():
     app = LiveApp(LabSettings(map_kind="bernoulli", n_agents=4, fow=False))
     _run(app, 900)
     assert all(app.results[a.id].success for a in app.scenario.agents)
-    assert all(a.pos.dist(app._goal_for(a)) < 0.6 for a in app.scenario.agents)
+    assert all(a.pos.dist(app.sim.goal_for(a)) < 0.6 for a in app.scenario.agents)
 
 
 def test_agents_never_enter_walls_on_grid():
@@ -66,7 +66,7 @@ def test_panel_change_rebuilds_and_planner_switch_keeps_map():
     app.panel.get("planner").index = app.panel.get("planner").options.index("straight_line")
     app._on_panel_change("planner", True)
     assert app.scenario.world is world_before
-    assert app.planner.name == "straight_line"
+    assert app.sim.planner.name == "straight_line"
     assert not app.panel.get("w").visible
 
 
@@ -96,34 +96,34 @@ def test_continuous_add_and_delete_keep_physics_in_sync():
     app.draw()
     world = app.scenario.world
     n0 = len(world.obstacles)
-    shapes0 = len(app.space.shapes)
+    shapes0 = len(app.sim.space.shapes)
     pos = app.camera.world_to_screen(Vec2(3.0, 3.0))
     _click(app, pos, 1)
     assert len(world.obstacles) == n0 + 1
-    assert len(app.space.shapes) == shapes0 + 1
+    assert len(app.sim.space.shapes) == shapes0 + 1
     new_id = world.obstacles[-1].id
     assert new_id in app.scenario.belief.obstacles  # fog off: planner knows at once
     _click(app, pos, 3)
     assert len(world.obstacles) == n0
-    assert len(app.space.shapes) == shapes0
+    assert len(app.sim.space.shapes) == shapes0
     assert new_id not in app.scenario.belief.obstacles
 
 
 def test_pending_edit_continuous_removes_body():
     app = LiveApp(LabSettings(world_kind="continuous", map_kind="polygons", fow=False, n_agents=1))
-    shapes0 = len(app.space.shapes)
+    shapes0 = len(app.sim.space.shapes)
     assert app.scenario.pending_edit is not None
     _key(app, pygame.K_e)
     assert app.scenario.pending_edit is None
-    assert len(app.space.shapes) == shapes0 - 1
+    assert len(app.sim.space.shapes) == shapes0 - 1
 
 
 def test_weight_changes_expansions():
     app = LiveApp(LabSettings(map_kind="bernoulli", n_agents=1, fow=False, seed=3))
-    e1 = app.results[app._focus_id()].expansions
+    e1 = app.results[app.sim.focus_id()].expansions
     app.panel.get("w").value = 3.0
     app._on_panel_change("w", True)
-    e3 = app.results[app._focus_id()].expansions
+    e3 = app.results[app.sim.focus_id()].expansions
     assert e3 < e1
 
 
@@ -150,15 +150,15 @@ def test_half_visible_obstacle_keeps_its_hidden_part_drawn():
     world = app.scenario.world
     world.obstacles = [PolygonObstacle(id="wall", polygon=box(20.0, 10.0, 30.0, 12.0))]
     world.invalidate()
-    app._sync_physics()
+    app.sim.sync_physics()
     agent = app.scenario.agents[0]
     agent.pos = Vec2(20.0, 16.0)  # sees the left end of the wall only
     if agent.body is not None:
         agent.body.position = (20.0, 16.0)
     app.scenario.belief.obstacles.clear()
-    app._reveal()
-    assert "wall" in app.seen_ids
-    remembered, ghosts = app._fog_memory()
+    app.sim.reveal()
+    assert "wall" in app.sim.seen_ids
+    remembered, ghosts = app.sim.fog_memory()
     assert [r.id for r in remembered] == ["wall"] and not ghosts
 
     app.draw()
