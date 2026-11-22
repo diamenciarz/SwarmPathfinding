@@ -2,7 +2,7 @@
 
 A Python lab for **comparing pathfinding algorithms** on grids and continuous polygonal worlds, with swarms, physics, slow map edits, and fog of war.
 
-Algorithm folders still hold student markdown only (no A\* / D\* Lite yet). Phase 2 is the **package skeleton + Pygame live lab**.
+Algorithm folders still hold student markdown only. The one real planner so far is **weighted A\*** (`weighted_a_star`); D\* Lite and the rest are still to come. Phase 2 is the **package skeleton + Pygame live lab**.
 
 ## What we are measuring
 
@@ -45,11 +45,23 @@ python -m swarmpathfinding
 | CSV pack | `python -m swarmpathfinding.bench --pack slow_edit --algo straight_line` |
 | Notebooks | `notebooks/00_how_to_test.ipynb`, `01_live_presets.ipynb`, `02_run_pack.ipynb` |
 
-The live window: left/center is the world, right is the side panel. **LMB** adds a wall, **RMB** deletes one, **G+LMB** sets the goal, **E** applies a pending slow-edit, **Space** pauses, **.** steps, **R** regenerates, **Esc** quits.
+The live window: the world is on the left, the side panel on the right. Changing any panel control applies at once (sliders apply on release). Planner and `w` changes replan on the same map; everything else rebuilds the scenario with the same seed.
+
+| Input | Action |
+|---|---|
+| **LMB** / **RMB** | add / delete a wall (grid cell, or a box polygon in continuous worlds) |
+| **G** + **LMB** | set the goal for every agent |
+| **E** | apply the pending slow-edit (the wall outlined in gold) |
+| **Wheel** / **MMB** drag / **F** | zoom / pan / fit the view |
+| **Space** / **.** | pause / single step |
+| **R** | restart the scenario |
+| **Esc** | quit |
+
+With fog of war on, the view shows what the swarm remembers, not the truth: unknown is dark, remembered-but-not-visible is dimmed, and memories the world has since contradicted are tinted red ("stale"). In continuous worlds moving obstacles that are out of sight are drawn as yellow ghosts extrapolated along their last-seen velocity. **Show search** paints the cells the focus agent's planner expanded (agent 0, ringed in orange).
 
 Notebooks are **launchers**, not a second UI. `launch_lab(...)` blocks the kernel until you close Pygame. Use the **SwarmPathfinding** kernel (the project `.venv`).
 
-Stub planners: `none`, `straight_line` (succeeds only if the last-seen map allows a straight shot). Real algorithms come in Phase 4.
+Planners: `weighted_a_star` (8-connected A\* on the last-seen map, f = g + w·h; `w` = 1 is optimal, larger `w` expands fewer cells for a path at most `w` times longer; continuous worlds are searched on a rasterised map with obstacles inflated by the agent radius), plus the stubs `none` and `straight_line` (succeeds only if the last-seen map allows a straight shot). Each agent plans its own route; unknown cells count as free.
 
 Scenario packs (density, spawn layout, slow-edit, FOW, movers):
 
@@ -78,4 +90,4 @@ Start here:
 
 ## Next
 
-Implement real planners (A\* first, then D\* Lite), flow-field cache overlays, ORCA on Pymunk. Each algorithm folder grows `planner.py` + `debug.py` implementing the UI contract in `docs/06-debug-ui-contract.md`.
+Implement more planners (D\* Lite next), flow-field cache overlays, ORCA on Pymunk. Each algorithm folder grows `planner.py` + `debug.py` implementing the UI contract in `docs/06-debug-ui-contract.md`.

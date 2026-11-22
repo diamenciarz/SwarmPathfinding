@@ -19,7 +19,7 @@ class CircleVision:
         return origin.dist_sq(point) <= self.radius * self.radius
 
     def footprint_polygon(self, origin: Vec2, heading: float) -> Polygon:
-        return Point(origin.x, origin.y).buffer(self.radius, resolution=16)
+        return Point(origin.x, origin.y).buffer(self.radius, quad_segs=16)
 
     def visible_cells(
         self,

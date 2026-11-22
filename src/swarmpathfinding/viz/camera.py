@@ -25,13 +25,25 @@ class Camera:
         return Vec2(x, y)
 
     def fit(self, width: float, height: float, padding: float = 0.5) -> None:
+        """Zoom so the whole world fits, centred in the viewport."""
         if self.viewport.width <= 0 or self.viewport.height <= 0:
             return
         zx = self.viewport.width / max(width + 2 * padding, 1e-6)
         zy = self.viewport.height / max(height + 2 * padding, 1e-6)
         self.zoom = max(4.0, min(zx, zy))
-        self.x = -padding
-        self.y = -padding
+        self.x = width / 2 - self.viewport.width / (2 * self.zoom)
+        self.y = height / 2 - self.viewport.height / (2 * self.zoom)
+
+    def set_viewport(self, viewport: pygame.Rect) -> None:
+        """Change the viewport, keeping the world point at its centre in place."""
+        if self.viewport.width > 0 and self.viewport.height > 0:
+            center = self.screen_to_world(*self.viewport.center)
+        else:
+            center = None
+        self.viewport = viewport
+        if center is not None:
+            self.x = center.x - viewport.width / (2 * self.zoom)
+            self.y = center.y - viewport.height / (2 * self.zoom)
 
     def pan(self, dx_px: float, dy_px: float) -> None:
         self.x -= dx_px / self.zoom
