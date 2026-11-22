@@ -37,3 +37,6 @@ class Budget:
     max_ms: float | None = None
     max_expansions: int | None = None
     weight: float = 1.0
+    # Ask the planner to record its search events in `PathResult.extra["trace"]`
+    # (see core/trace.py). Off by default: it costs time and memory.
+    record_trace: bool = False

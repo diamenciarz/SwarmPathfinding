@@ -88,6 +88,21 @@ Start here:
 - Classical ant-colony optimization as a planner (see [algorithms/pheromone_stigmergy/README.md](algorithms/pheromone_stigmergy/README.md))
 - Jupyter as the main UI (Pygame is the lab)
 
+## Headless simulation
+
+`swarmpathfinding.sim.Simulation` is the stepping the live lab draws, with no pygame. Same `SimConfig` + seed = same run, so benchmarks match what you watch:
+
+```python
+from swarmpathfinding.sim import SimConfig, Simulation
+sim = Simulation(SimConfig(map_kind="rooms", n_agents=10, fow=True, changes="slow_edit", edit_at=3.0))
+sim.run(max_time=60)      # True when every agent finished its route
+sim.stats                 # plans, plan_ms, expansions, plans/ms after the edit, travelled, arrival times
+```
+
+`changes="slow_edit"` deletes the pre-picked wall automatically at `edit_at` seconds (Changes: *auto edit* in the panel); with `"none"` it waits for **E**.
+
+Planners rate themselves per scenario trait in `capabilities` (`core/capabilities.py`): designed for, works as is, works through a stated adaptation, or cannot. `compatibility(planner, scenario_traits(config))` says whether a planner may run a scenario and how it copes.
+
 ## Next
 
 Implement more planners (D\* Lite next), flow-field cache overlays, ORCA on Pymunk. Each algorithm folder grows `planner.py` + `debug.py` implementing the UI contract in `docs/06-debug-ui-contract.md`.

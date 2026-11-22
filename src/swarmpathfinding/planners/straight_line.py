@@ -5,6 +5,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from swarmpathfinding.core.belief import BLOCKED, UNKNOWN, BeliefMap
+from swarmpathfinding.core.capabilities import adapted
 from swarmpathfinding.core.geom import Vec2
 from swarmpathfinding.core.protocols import BasePathfinder, EmptyDebugLayer
 from swarmpathfinding.core.registry import register
@@ -17,6 +18,11 @@ class StraightLinePlanner(BasePathfinder):
     """Phase-2 stub: succeed only if last-seen occupancy allows a straight shot."""
 
     name = "straight_line"
+    summary = "Stub: walks straight at the goal when the last-seen map shows a clear line, otherwise gives up."
+    capabilities = {
+        ("world", "grid"): adapted("fails unless there is a clear straight line"),
+        ("world", "continuous"): adapted("fails unless there is a clear straight line"),
+    }
 
     def plan(
         self,

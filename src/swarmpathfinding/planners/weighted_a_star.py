@@ -8,11 +8,13 @@ from typing import Any, Sequence
 import numpy as np
 
 from swarmpathfinding.core.belief import BeliefMap
+from swarmpathfinding.core.capabilities import adapted, designed
 from swarmpathfinding.core.geom import Cell, Vec2
 from swarmpathfinding.core.plan_grid import plan_grid
 from swarmpathfinding.core.protocols import BasePathfinder
 from swarmpathfinding.core.registry import register
 from swarmpathfinding.core.results import Budget, PathResult
+from swarmpathfinding.core.trace import EXPAND, PUSH, SearchTrace
 
 SQRT2 = math.sqrt(2.0)
 _MOVES = (
@@ -40,6 +42,18 @@ class WeightedAStarPlanner(BasePathfinder):
 
     name = "weighted_a_star"
     uses_weight = True
+    summary = "Best-first grid search on f = g + w*h. w = 1 is optimal A*; larger w is faster but up to w times longer."
+    capabilities = {
+        ("world", "grid"): designed(),
+        ("world", "continuous"): adapted("searches a 0.5-unit raster with obstacles inflated by the agent radius"),
+        ("knowledge", "full"): designed(),
+        ("knowledge", "fog"): adapted("unknown cells count as free; replans from scratch when a seen wall blocks the route"),
+        ("changes", "static"): designed(),
+        ("changes", "slow_edit"): adapted("replans from scratch after the edit"),
+        ("changes", "movers"): adapted("moving obstacles are frozen where they were last seen"),
+        ("agents", "single"): designed(),
+        ("agents", "crowd"): adapted("one search per agent (shared by agents in the same half-cell)"),
+    }
 
     def __init__(self, weight: float = 1.0, agent_radius: float = 0.35, resolution: float = 0.5):
         self.weight = weight
@@ -70,8 +84,11 @@ class WeightedAStarPlanner(BasePathfinder):
         elif blocked[g_cell.y, g_cell.x]:
             return PathResult(path=(start,), success=False, runtime_ms=_ms(t0))
         max_exp = budget.max_expansions if budget is not None else None
-        cells, expansions, closed = _search(blocked, s_cell, g_cell, w, max_exp)
+        trace = SearchTrace(cell_size=grid.cell_size) if budget is not None and budget.record_trace else None
+        cells, expansions, closed = _search(blocked, s_cell, g_cell, w, max_exp, trace)
         extra = {"closed": closed, "cell_size": grid.cell_size, "weight": w}
+        if trace is not None:
+            extra["trace"] = trace
         if cells is None:
             return PathResult(
                 path=(start,), success=False, expansions=expansions, runtime_ms=_ms(t0), extra=extra
@@ -97,7 +114,12 @@ def _ms(t0: float) -> float:
 
 
 def _search(
-    blocked: np.ndarray, start: Cell, goal: Cell, w: float, max_expansions: int | None
+    blocked: np.ndarray,
+    start: Cell,
+    goal: Cell,
+    w: float,
+    max_expansions: int | None,
+    trace: SearchTrace | None = None,
 ) -> tuple[list[Cell] | None, int, np.ndarray]:
     h, width = blocked.shape
     flat_blocked = blocked.ravel().tolist()
@@ -118,14 +140,18 @@ def _search(
 
     g[s] = 0.0
     heap = [(heur(start.x, start.y), 0.0, s)]
+    if trace is not None:
+        trace.add(PUSH, start.x, start.y, 0.0, heap[0][0])
     expansions = 0
     found = False
     while heap:
-        _, gc, cur = heapq.heappop(heap)
+        fc, gc, cur = heapq.heappop(heap)
         if closed[cur]:
             continue
         closed[cur] = 1
         expansions += 1
+        if trace is not None:
+            trace.add(EXPAND, cur % width, cur // width, gc, fc)
         if cur == t:
             found = True
             break
@@ -146,7 +172,10 @@ def _search(
             if ng < g[nb]:
                 g[nb] = ng
                 parent[nb] = cur
-                heapq.heappush(heap, (ng + heur(nx, ny), ng, nb))
+                fn = ng + heur(nx, ny)
+                heapq.heappush(heap, (fn, ng, nb))
+                if trace is not None:
+                    trace.add(PUSH, nx, ny, ng, fn)
     closed_mask = np.frombuffer(bytes(closed), dtype=np.uint8).reshape(h, width).astype(bool)
     if not found:
         return None, expansions, closed_mask
