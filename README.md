@@ -55,7 +55,10 @@ The live window: the world is on the left, the side panel on the right. Changing
 | **Wheel** / **MMB** drag / **F** | zoom / pan / fit the view |
 | **Space** / **.** | pause / single step |
 | **R** | restart the scenario |
-| **Esc** | quit |
+| **M** | open the lab menu (also the button at the top of the panel) |
+| **Esc** | close the menu, or quit when it is closed |
+
+**Lab menu.** A popup over the paused view (the simulation resumes when it closes). Tab **1 Scenario**: set the scenario on the left; the right side lists every planner with a badge for how it fits this scenario (star = designed for it, check = works as is, ~ = adapted, cross = cannot) and the notes on each adaptation. Click a planner, then **Apply** (Enter) to load it all into the live view, or **Randomise** for a random scenario. Tab **2 Planners**: every planner against every scenario trait; hover a cell for the note, the highlighted column is the current scenario, and **Use in current scenario** switches planner on the same map. Planners declare these ratings in their `capabilities` dict (see `core/capabilities.py`).
 
 With fog of war on, the view shows what the swarm remembers, not the truth: unknown is dark, remembered-but-not-visible is dimmed, and memories the world has since contradicted are tinted red ("stale"). In continuous worlds moving obstacles that are out of sight are drawn as yellow ghosts extrapolated along their last-seen velocity. **Show search** paints the cells the focus agent's planner expanded (agent 0, ringed in orange).
 

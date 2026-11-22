@@ -11,6 +11,7 @@ from swarmpathfinding.core.results import Budget, PathResult
 @register("none")
 class NonePlanner(BasePathfinder):
     name = "none"
+    label = "none (baseline)"
     summary = "Baseline that never plans: agents stay put."
 
     def plan(
