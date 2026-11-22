@@ -159,6 +159,7 @@ def make_scenario(
     )
     raster_w, raster_h = int(width), int(height)
     belief = BeliefMap.unknown_grid(raster_w, raster_h)
+    belief.kind = "continuous"
     if not fow:
         belief.occupancy[:, :] = 0
         belief.seen_time[:, :] = 0.0
@@ -212,7 +213,8 @@ def apply_pending_edit(scenario: Scenario) -> bool:
         return changed
     if edit.kind == "obstacle" and edit.obstacle_id and isinstance(world, ContinuousWorld):
         changed = world.remove_obstacle(edit.obstacle_id)
-        if changed:
+        if changed and not scenario.fow:
+            # Under fog the swarm only learns about the removal when it looks again.
             scenario.belief.forget_obstacle(edit.obstacle_id)
         scenario.pending_edit = None
         return changed

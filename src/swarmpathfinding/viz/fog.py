@@ -1,94 +1,61 @@
+"""Visibility for the live lab: which cells the swarm sees right now."""
+
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
-import pygame
-from shapely.geometry import Polygon
+import shapely
 from shapely.ops import unary_union
 
-from swarmpathfinding.core.geom import Vec2
 from swarmpathfinding.physics.bodies import Agent
-from swarmpathfinding.viz.camera import Camera
-from swarmpathfinding.viz.colors import FOG, VISION, VISION_EDGE
 from swarmpathfinding.worlds.grid import GridWorld
 
 
 @dataclass(slots=True)
-class FogCache:
-    mask: np.ndarray | None = None
-    last_positions: tuple[tuple[float, float], ...] = ()
-    frame: int = 0
-    skip: int = 5
-    move_eps: float = 0.35
-    union_polygon: Polygon | None = field(default=None, repr=False)
+class GridVisionCache:
+    """Per-agent visible-cell lists, recomputed only when an agent changes cell,
+    turns noticeably, or the map changes. LOS ray casts are the expensive part."""
 
-    def needs_rebuild(self, agents: list[Agent], frame: int) -> bool:
-        positions = tuple((round(a.pos.x, 2), round(a.pos.y, 2)) for a in agents)
-        if self.mask is None:
-            return True
-        if frame - self.frame >= self.skip:
-            return True
-        if len(positions) != len(self.last_positions):
-            return True
-        for a, b in zip(positions, self.last_positions):
-            if (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 > self.move_eps * self.move_eps:
-                return True
-        return False
+    entries: dict[int, tuple[tuple, np.ndarray, np.ndarray]] = field(default_factory=dict)
 
+    def clear(self) -> None:
+        self.entries.clear()
 
-def visible_mask_grid(world: GridWorld, agents: list[Agent], require_los: bool = True) -> np.ndarray:
-    visible = np.zeros((world.height, world.width), dtype=bool)
-    for agent in agents:
-        for cell in agent.vision.visible_cells(agent.pos, agent.heading, world, require_los=require_los):
-            visible[cell.y, cell.x] = True
-    return visible
+    def visible_mask(self, world: GridWorld, agents: list[Agent], require_los: bool) -> np.ndarray:
+        visible = np.zeros((world.height, world.width), dtype=bool)
+        for agent in agents:
+            cell = world.world_to_cell(agent.pos)
+            heading_key = round(agent.heading / math.radians(5)) if agent.vision.name == "cone" else 0
+            key = (cell, heading_key, world.generation, require_los, id(agent.vision))
+            hit = self.entries.get(agent.id)
+            if hit is None or hit[0] != key:
+                cells = list(agent.vision.visible_cells(agent.pos, agent.heading, world, require_los=require_los))
+                xs = np.fromiter((c.x for c in cells), dtype=np.int64, count=len(cells))
+                ys = np.fromiter((c.y for c in cells), dtype=np.int64, count=len(cells))
+                hit = (key, xs, ys)
+                self.entries[agent.id] = hit
+            visible[hit[2], hit[1]] = True
+        return visible
 
 
-def vision_union_polygon(agents: list[Agent]) -> Polygon:
-    polys = [agent.vision.footprint_polygon(agent.pos, agent.heading) for agent in agents]
+def vision_union(agents: list[Agent]):
+    polys = [
+        agent.vision.footprint_polygon(agent.pos, agent.heading)
+        for agent in agents
+        if getattr(agent.vision, "radius", 0.0) > 0
+    ]
     if not polys:
-        return Polygon()
+        return None
     return unary_union(polys)
 
 
-def draw_vision(surface: pygame.Surface, camera: Camera, agents: list[Agent]) -> None:
-    for agent in agents:
-        poly = agent.vision.footprint_polygon(agent.pos, agent.heading)
-        points = [camera.world_to_screen(Vec2(x, y)) for x, y in poly.exterior.coords]
-        if len(points) >= 3:
-            overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-            pygame.draw.polygon(overlay, VISION, points)
-            pygame.draw.polygon(overlay, VISION_EDGE, points, width=1)
-            surface.blit(overlay, (0, 0))
-
-
-def draw_fog_mask(
-    surface: pygame.Surface,
-    camera: Camera,
-    world: GridWorld,
-    visible: np.ndarray,
-) -> None:
-    overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-    cs = world.cell_size
-    for y in range(world.height):
-        row = visible[y]
-        x = 0
-        while x < world.width:
-            if row[x]:
-                x += 1
-                continue
-            x1 = x
-            while x1 < world.width and not row[x1]:
-                x1 += 1
-            top_left = camera.world_to_screen(Vec2(x * cs, (y + 1) * cs))
-            bottom_right = camera.world_to_screen(Vec2(x1 * cs, y * cs))
-            rect = pygame.Rect(
-                top_left[0],
-                top_left[1],
-                max(1, bottom_right[0] - top_left[0]),
-                max(1, bottom_right[1] - top_left[1]),
-            )
-            overlay.fill(FOG, rect)
-            x = x1
-    surface.blit(overlay, (0, 0))
+def raster_visible(union, width: int, height: int, cell_size: float = 1.0) -> np.ndarray:
+    """Cells whose centre lies inside the vision union (vectorised)."""
+    if union is None or union.is_empty:
+        return np.zeros((height, width), dtype=bool)
+    xs = (np.arange(width) + 0.5) * cell_size
+    ys = (np.arange(height) + 0.5) * cell_size
+    gx, gy = np.meshgrid(xs, ys)
+    return shapely.contains_xy(union, gx, gy)

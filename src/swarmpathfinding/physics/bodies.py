@@ -7,7 +7,7 @@ import pymunk
 
 from swarmpathfinding.core.geom import Vec2
 from swarmpathfinding.vision.shapes import CircleVision
-from swarmpathfinding.worlds.continuous import ContinuousWorld
+from swarmpathfinding.worlds.continuous import ContinuousWorld, PolygonObstacle
 from swarmpathfinding.worlds.grid import GridWorld
 
 
@@ -76,8 +76,15 @@ def attach_pymunk(agents: list[Agent], space: pymunk.Space) -> None:
         agent.shape = shape
 
 
-def make_space_for_world(world: ContinuousWorld) -> tuple[pymunk.Space, dict[str, pymunk.Body]]:
-    """Static polys for walls; kinematic bodies for movers so agents cannot tunnel."""
+def make_space_for_world(
+    world: ContinuousWorld,
+    shapes_out: dict[str, tuple[pymunk.Shape, pymunk.Body | None]] | None = None,
+) -> tuple[pymunk.Space, dict[str, pymunk.Body]]:
+    """Static polys for walls; kinematic bodies for movers so agents cannot tunnel.
+
+    Pass `shapes_out` to receive obstacle id -> (shape, kinematic body or None),
+    which `remove_obstacle_body` needs when an obstacle is deleted later.
+    """
     space = pymunk.Space()
     space.gravity = (0, 0)
     static = space.static_body
@@ -94,24 +101,44 @@ def make_space_for_world(world: ContinuousWorld) -> tuple[pymunk.Space, dict[str
         space.add(seg)
     movers: dict[str, pymunk.Body] = {}
     for obs in world.obstacles:
-        verts = [(v.x, v.y) for v in obs.vertices()]
-        if len(verts) < 3:
+        entry = add_obstacle_body(space, obs)
+        if entry is None:
             continue
-        if obs.velocity.length_sq() > 0.0:
-            cx, cy = obs.position.x, obs.position.y
-            local = [(x - cx, y - cy) for x, y in verts]
-            body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-            body.position = (cx, cy)
-            body.velocity = (obs.velocity.x, obs.velocity.y)
-            poly = pymunk.Poly(body, local)
-            poly.friction = 0.8
-            space.add(body, poly)
-            movers[obs.id] = body
-        else:
-            poly = pymunk.Poly(static, verts)
-            poly.friction = 0.8
-            space.add(poly)
+        if shapes_out is not None:
+            shapes_out[obs.id] = entry
+        if entry[1] is not None:
+            movers[obs.id] = entry[1]
     return space, movers
+
+
+def add_obstacle_body(
+    space: pymunk.Space, obs: PolygonObstacle
+) -> tuple[pymunk.Shape, pymunk.Body | None] | None:
+    verts = [(v.x, v.y) for v in obs.vertices()]
+    if len(verts) < 3:
+        return None
+    if obs.velocity.length_sq() > 0.0:
+        cx, cy = obs.position.x, obs.position.y
+        local = [(x - cx, y - cy) for x, y in verts]
+        body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        body.position = (cx, cy)
+        body.velocity = (obs.velocity.x, obs.velocity.y)
+        poly = pymunk.Poly(body, local)
+        poly.friction = 0.8
+        space.add(body, poly)
+        return poly, body
+    poly = pymunk.Poly(space.static_body, verts)
+    poly.friction = 0.8
+    space.add(poly)
+    return poly, None
+
+
+def remove_obstacle_body(space: pymunk.Space, entry: tuple[pymunk.Shape, pymunk.Body | None]) -> None:
+    shape, body = entry
+    if body is not None:
+        space.remove(shape, body)
+    else:
+        space.remove(shape)
 
 
 def sync_mover_bodies(world: ContinuousWorld, movers: dict[str, pymunk.Body]) -> None:

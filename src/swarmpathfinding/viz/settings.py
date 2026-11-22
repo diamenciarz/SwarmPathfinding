@@ -12,7 +12,7 @@ from swarmpathfinding.viz.panel import SidePanel
 class LabSettings:
     world_kind: str = "grid"
     map_kind: str = "bernoulli"
-    planner: str = "straight_line"
+    planner: str = "weighted_a_star"
     vision: str = "circle"
     starts: str = "clump"
     density: float = 0.15
@@ -22,9 +22,10 @@ class LabSettings:
     seed: int = 1
     fow: bool = True
     los: bool = True
+    show_search: bool = False
 
     @classmethod
-    def from_spec(cls, spec: ScenarioSpec, planner: str = "straight_line") -> LabSettings:
+    def from_spec(cls, spec: ScenarioSpec, planner: str = "weighted_a_star") -> LabSettings:
         return cls(
             world_kind=spec.world_kind,
             map_kind=spec.map_kind,
@@ -66,7 +67,6 @@ PRESETS: dict[str, LabSettings] = {
         map_kind="rooms",
         n_agents=1,
         fow=False,
-        planner="straight_line",
     ),
     "utrap": LabSettings(
         world_kind="continuous",
@@ -112,6 +112,9 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--fow", dest="fow", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--los", dest="los", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument(
+        "--show-search", dest="show_search", action=argparse.BooleanOptionalAction, default=None
+    )
     args = parser.parse_args(argv)
 
     settings = LabSettings()
@@ -124,7 +127,7 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
         if not specs:
             raise SystemExit(f"pack {args.pack!r} is empty")
         idx = min(max(args.index, 0), len(specs) - 1)
-        settings = LabSettings.from_spec(specs[idx], planner=args.planner or "straight_line")
+        settings = LabSettings.from_spec(specs[idx], planner=args.planner or "weighted_a_star")
 
     updates = {}
     for name in (
@@ -140,6 +143,7 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
         "seed",
         "fow",
         "los",
+        "show_search",
     ):
         value = getattr(args, name)
         if value is not None and value != "":
@@ -150,7 +154,7 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
 
 
 def apply_settings(panel: SidePanel, settings: LabSettings) -> None:
-    """Write settings into the side panel. Call twice around world_kind map-list swap."""
+    """Write settings into the side panel (the map list follows world_kind)."""
     _set_cycle(panel, "world_kind", settings.world_kind)
     wanted = list(GRID_MAPS) if settings.world_kind == "grid" else list(POLY_MAPS)
     maps = next(c for c in panel.cycles if c.key == "map_kind")
@@ -166,6 +170,7 @@ def apply_settings(panel: SidePanel, settings: LabSettings) -> None:
     _set_slider(panel, "seed", max(1, settings.seed))
     _set_check(panel, "fow", settings.fow)
     _set_check(panel, "los", settings.los)
+    _set_check(panel, "show_search", settings.show_search)
 
 
 def _set_cycle(panel: SidePanel, key: str, value: str) -> None:

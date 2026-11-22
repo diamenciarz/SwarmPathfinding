@@ -42,6 +42,8 @@ class BeliefMap:
     obstacles: dict[str, ObstacleRecord] = field(default_factory=dict)
     generation: int = 0
     freespace_unknown: bool = True
+    # Derived data (e.g. planning grids) keyed by generation; see core/plan_grid.py.
+    derived: dict = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
     def unknown_grid(cls, width: int, height: int) -> BeliefMap:
@@ -63,7 +65,10 @@ class BeliefMap:
         return belief
 
     def clone_empty(self) -> BeliefMap:
-        return BeliefMap.unknown_grid(self.width, self.height)
+        empty = BeliefMap.unknown_grid(self.width, self.height)
+        empty.kind = self.kind
+        empty.freespace_unknown = self.freespace_unknown
+        return empty
 
     def is_unknown(self, cell: Cell) -> bool:
         if not self.in_bounds(cell):
@@ -107,6 +112,26 @@ class BeliefMap:
             self.seen_time[cell.y, cell.x] = now
         return discrepancies
 
+    def observe_mask(self, visible: np.ndarray, truth_blocked: np.ndarray, now: float) -> int:
+        """Vectorised `observe_cells`: write truth for every True cell of `visible`.
+
+        Returns how many cells changed value (unknown -> known counts too).
+        """
+        actual = np.where(truth_blocked, BLOCKED, FREE).astype(np.int8)
+        changed = visible & (self.occupancy != actual)
+        n = int(np.count_nonzero(changed))
+        if n:
+            self.occupancy[changed] = actual[changed]
+            self.generation += 1
+        self.seen_time[visible] = now
+        return n
+
+    def stale_cells(self, truth_blocked: np.ndarray) -> np.ndarray:
+        """Known cells whose remembered value no longer matches the world."""
+        known = self.occupancy != UNKNOWN
+        remembered_blocked = self.occupancy == BLOCKED
+        return known & (remembered_blocked != truth_blocked)
+
     def observe_obstacle(self, record: ObstacleRecord) -> bool:
         previous = self.obstacles.get(record.id)
         changed = (
@@ -131,10 +156,11 @@ class BeliefMap:
         ghosts: list[ObstacleRecord] = []
         for record in self.obstacles.values():
             pos = record.ghost_position(now, freeze=freeze)
+            delta = pos - record.position
             ghosts.append(
                 ObstacleRecord(
                     id=record.id,
-                    vertices=record.vertices,
+                    vertices=tuple(v + delta for v in record.vertices),
                     position=pos,
                     velocity=record.velocity,
                     last_seen_time=record.last_seen_time,

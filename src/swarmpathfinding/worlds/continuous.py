@@ -180,5 +180,12 @@ def _union_polygons(geoms) -> Polygon:
                 merged = merged.union(geom.buffer(0))
             except GEOSException:
                 continue
-    valid = as_valid_polygon(merged)
-    return valid if valid is not None else Polygon()
+    # Keep every piece: obstacles that do not touch merge into a MultiPolygon.
+    if merged.is_empty:
+        return Polygon()
+    if not merged.is_valid:
+        try:
+            merged = make_valid(merged)
+        except (GEOSException, ValueError):
+            return Polygon()
+    return merged
