@@ -28,6 +28,7 @@ from swarmpathfinding.viz.draw import (
     draw_visible_truth,
     draw_vision_union,
 )
+from swarmpathfinding.viz.menu import MenuOverlay, set_form_values
 from swarmpathfinding.viz.panel import Check, Cycle, SidePanel, Slider
 from swarmpathfinding.viz.settings import LabSettings, apply_settings, parse_lab_args
 from swarmpathfinding.worlds.continuous import ContinuousWorld
@@ -35,6 +36,7 @@ from swarmpathfinding.worlds.grid import GridWorld
 
 PANEL_W = 320
 HELP = [
+    ("M", "lab menu"),
     ("LMB", "add wall"),
     ("RMB", "delete wall"),
     ("G+LMB", "set goal"),
@@ -78,6 +80,37 @@ class LiveApp:
         self.sim = Simulation(self._config())
         self.sim.record_focus_trace = bool(self.panel.get("show_search").value)
         self._fit()
+        self.menu = MenuOverlay(self.font, self.small, self.apply_config, lambda: self._config().as_dict())
+        self.menu.on_close = self._menu_closed
+        self._paused_before_menu = True
+
+    # ------------------------------------------------------------------ menu
+
+    def open_menu(self, tab: int | None = None) -> None:
+        if self.menu.is_open:
+            return
+        self._paused_before_menu = self.paused
+        self.paused = True
+        self.panning = False
+        self.place_goal = False
+        self.menu.open(tab)
+
+    def _menu_closed(self) -> None:
+        self.paused = self._paused_before_menu
+
+    def apply_config(self, values: dict) -> None:
+        """Load menu values into the live view. Only a planner change keeps the map."""
+        planner_only = set(values) == {"planner"}
+        panel_keys = {w.key for w in self.panel.widgets}
+        set_form_values(self.panel, {k: v for k, v in values.items() if k in panel_keys})
+        for k, v in values.items():
+            if k not in panel_keys and k in SIM_KEYS:
+                self.extra_config[k] = v
+        self._sync_panel_state()
+        if planner_only:
+            self.sim.set_planner(values["planner"], sync=True)
+        else:
+            self.rebuild()
 
     # ------------------------------------------------------------------ sim access
 
@@ -136,6 +169,7 @@ class LiveApp:
             Check("show_search", "Show search", False, section="Planner"),
         ]
         panel.button_label = "Restart scenario  (R)"
+        panel.top_button_label = "Lab menu  (M)"
         panel.set_help(HELP)
         panel.set_on_change(self._on_panel_change)
         return panel
@@ -225,9 +259,15 @@ class LiveApp:
         if event.type == pygame.VIDEORESIZE:
             self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
             self._layout()
+        if self.menu.is_open:
+            self.menu.handle(event)
+            return True
         action = self.panel.handle(event)
         if action == "button":
             self.rebuild()
+            return True
+        if action == "top":
+            self.open_menu()
             return True
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
@@ -245,6 +285,8 @@ class LiveApp:
                 self.sim.apply_pending_edit(sync=self.paused)
             if event.key == pygame.K_g:
                 self.place_goal = True
+            if event.key == pygame.K_m:
+                self.open_menu()
         if event.type == pygame.KEYUP and event.key == pygame.K_g:
             self.place_goal = False
         if event.type == pygame.MOUSEWHEEL and self.camera.contains_screen(*pygame.mouse.get_pos()):
@@ -312,6 +354,7 @@ class LiveApp:
             self._banner(world_surface, "Paused: press Space to run, . to step")
         self._metrics()
         self.panel.draw(self.screen)
+        self.menu.draw(self.screen)
         pygame.display.flip()
 
     def _draw_pending(self, surface: pygame.Surface) -> None:

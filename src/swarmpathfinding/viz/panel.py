@@ -105,7 +105,11 @@ class SidePanel:
         self._metrics: list[tuple[str, str]] = []
         self._on_change: ChangeFn | None = None
         self._button_rect = pygame.Rect(0, 0, 0, 0)
-        self.button_label = "Restart"
+        self._top_rect = pygame.Rect(0, 0, 0, 0)
+        self.button_label: str | None = "Restart"  # bottom action button; None hides it
+        self.top_button_label: str | None = None  # button under the title; None hides it
+        self.title: str | None = "SwarmPathfinding"
+        self.edge_line = True  # accent rule on the left edge (side panel look)
         self.scroll = 0
         self._content_h = 0
 
@@ -149,8 +153,10 @@ class SidePanel:
             if not self.rect.collidepoint(event.pos):
                 return None
             mx, my = event.pos
-            if self._button_rect.collidepoint(mx, my):
+            if self.button_label and self._button_rect.collidepoint(mx, my):
                 return "button"
+            if self.top_button_label and self._top_rect.collidepoint(mx, my):
+                return "top"
             for w in self.widgets:
                 if not (w.visible and w.enabled):
                     continue
@@ -199,7 +205,14 @@ class SidePanel:
         w = self.rect.width - 28
         top = self.rect.y + 10 - self.scroll
         y = top
-        y = self._blit(surface, "SwarmPathfinding", x, y, self.font, ACCENT) + 2
+        if self.title:
+            y = self._blit(surface, self.title, x, y, self.font, ACCENT) + 2
+        if self.top_button_label:
+            self._top_rect = pygame.Rect(x, y + 2, w, 26)
+            hot = self._top_rect.collidepoint(mouse)
+            pygame.draw.rect(surface, BUTTON_HOT if hot else BUTTON, self._top_rect, border_radius=4)
+            self._blit_center(surface, self.top_button_label, self._top_rect, self.small, PANEL_FG)
+            y = self._top_rect.bottom + 2
         for section in self.sections:
             items = [wd for wd in self.widgets if wd.section == section and wd.visible]
             if not items:
@@ -212,19 +225,23 @@ class SidePanel:
                     y = self._draw_slider(surface, wd, x, y, w)
                 else:
                     y = self._draw_check(surface, wd, x, y, w, mouse)
-        self._button_rect = pygame.Rect(x, y + 6, w, 28)
-        hot = self._button_rect.collidepoint(mouse)
-        pygame.draw.rect(surface, ACCENT if hot else BUTTON_HOT, self._button_rect, border_radius=4)
-        self._blit_center(surface, self.button_label, self._button_rect, self.small, PANEL_FG)
-        y = self._button_rect.bottom + 8
-        y = self._section(surface, "Live", x, y, w)
-        y = self._two_columns(surface, self._metrics, x, y, w, PANEL_MUTED, PANEL_FG)
-        y = self._section(surface, "Keys", x, y + 4, w)
-        y = self._two_columns(surface, self._help, x, y, w, ACCENT, PANEL_MUTED)
+        if self.button_label:
+            self._button_rect = pygame.Rect(x, y + 6, w, 28)
+            hot = self._button_rect.collidepoint(mouse)
+            pygame.draw.rect(surface, ACCENT if hot else BUTTON_HOT, self._button_rect, border_radius=4)
+            self._blit_center(surface, self.button_label, self._button_rect, self.small, PANEL_FG)
+            y = self._button_rect.bottom + 8
+        if self._metrics:
+            y = self._section(surface, "Live", x, y, w)
+            y = self._two_columns(surface, self._metrics, x, y, w, PANEL_MUTED, PANEL_FG)
+        if self._help:
+            y = self._section(surface, "Keys", x, y + 4, w)
+            y = self._two_columns(surface, self._help, x, y, w, ACCENT, PANEL_MUTED)
         self._content_h = (y - top) + 14
         self._scroll_by(0)
         surface.set_clip(prev_clip)
-        pygame.draw.line(surface, ACCENT, (self.rect.x, self.rect.y), (self.rect.x, self.rect.bottom), 2)
+        if self.edge_line:
+            pygame.draw.line(surface, ACCENT, (self.rect.x, self.rect.y), (self.rect.x, self.rect.bottom), 2)
         if self._content_h > self.rect.height:
             self._scrollbar(surface)
 

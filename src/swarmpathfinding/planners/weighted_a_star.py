@@ -42,6 +42,9 @@ class WeightedAStarPlanner(BasePathfinder):
 
     name = "weighted_a_star"
     uses_weight = True
+    params = (("w", "heuristic weight", 1.0, 3.0),)
+    overlays = ("closed set (Show search)",)
+    label = "weighted A*"
     summary = "Best-first grid search on f = g + w*h. w = 1 is optimal A*; larger w is faster but up to w times longer."
     capabilities = {
         ("world", "grid"): designed(),

@@ -18,6 +18,7 @@ class StraightLinePlanner(BasePathfinder):
     """Phase-2 stub: succeed only if last-seen occupancy allows a straight shot."""
 
     name = "straight_line"
+    label = "straight line"
     summary = "Stub: walks straight at the goal when the last-seen map shows a clear line, otherwise gives up."
     capabilities = {
         ("world", "grid"): adapted("fails unless there is a clear straight line"),
