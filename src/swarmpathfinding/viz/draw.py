@@ -24,6 +24,7 @@ from swarmpathfinding.viz.colors import (
     PATH,
     PATH_FAINT,
     PENDING_EDIT,
+    REMEMBERED_WALL,
     SEARCH,
     STALE,
     UNKNOWN_CELL,
@@ -134,10 +135,13 @@ def draw_floor(surface: pygame.Surface, camera: Camera, world: ContinuousWorld) 
 
 
 def draw_remembered(surface: pygame.Surface, camera: Camera, records: Iterable[ObstacleRecord]) -> None:
-    """Static obstacles as the swarm last saw them."""
+    """Obstacles as the swarm last saw them, in a dimmed wall colour.
+
+    Drawn over the fog so a remembered shape reads the same whether its cells
+    were seen or not; `draw_visible_truth` then paints the in-view part bright."""
     for rec in records:
         if len(rec.vertices) >= 3:
-            pygame.draw.polygon(surface, WALL, [camera.world_to_screen(v) for v in rec.vertices])
+            pygame.draw.polygon(surface, REMEMBERED_WALL, [camera.world_to_screen(v) for v in rec.vertices])
 
 
 def draw_visible_truth(surface: pygame.Surface, camera: Camera, world: ContinuousWorld, union) -> None:
