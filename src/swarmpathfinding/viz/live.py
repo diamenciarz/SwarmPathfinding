@@ -92,6 +92,8 @@ class LiveApp:
         self._sync_panel_state()
         self.sim = Simulation(self._config())
         self.sim.record_focus_trace = bool(self.panel.get("show_search").value)
+        if self.sim.record_focus_trace:
+            self.sim.replan_all(sync=True)  # the first plans ran before the flag was set
         self._fit()
         self.menu = MenuOverlay(self.font, self.small, self.apply_config, lambda: self._config().as_dict())
         self.menu.on_close = self._menu_closed
@@ -319,10 +321,12 @@ class LiveApp:
         self.panel.get("w").visible = planner_cls_uses_w
         grid = vals["world_kind"] == "grid"
         self.panel.get("los").enabled = grid
-        has_search = any(bool(getattr(_planner_class(p), "records_trace", False)) for p in self._pane_planners(vals["planner"]))
-        self.panel.get("show_search").visible = has_search
+        pane_classes = [_planner_class(p) for p in self._pane_planners(vals["planner"])]
+        has_trace = any(bool(getattr(c, "records_trace", False)) for c in pane_classes)
+        has_overlay = any(getattr(c, "draw_overlay", None) is not None for c in pane_classes)
+        self.panel.get("show_search").visible = has_trace or has_overlay
         for key in VIEW_KEYS:
-            self.panel.get(key).visible = has_search and bool(vals["show_search"])
+            self.panel.get(key).visible = has_trace and bool(vals["show_search"])
         self.panel.get("vision_radius").enabled = vals["vision"] != "none"
         forced = any(getattr(_planner_class(p), "forces_avoidance", False) for p in self._pane_planners(vals["planner"]))
         self.panel.get("avoidance").enabled = not forced

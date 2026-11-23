@@ -418,6 +418,9 @@ class PlannersTab:
         self._rows: list[tuple[pygame.Rect, str]] = []
         self._use_rect = pygame.Rect(0, 0, 0, 0)
         self.hover: tuple[str, str, str] | None = None
+        self.scroll = 0  # first matrix row shown
+        self._matrix_rect = pygame.Rect(0, 0, 0, 0)
+        self._hidden = 0  # rows that did not fit below the shown ones
 
     def planners(self) -> list[str]:
         names = list_planners()
@@ -429,6 +432,9 @@ class PlannersTab:
         return [n for n in names if mat[n][(trait, f)].fit == Fit.DESIGNED]
 
     def handle(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.MOUSEWHEEL and self._matrix_rect.collidepoint(pygame.mouse.get_pos()):
+            self.scroll = max(0, min(self.scroll - event.y, self.scroll + self._hidden))
+            return
         if event.type == pygame.MOUSEMOTION:
             self.hover = None
             for rect, name, trait, value in self._cells:
@@ -476,7 +482,7 @@ class PlannersTab:
         top = area.y + 44
         col_w = (area.width - name_w) // len(columns)
         avail = (area.bottom - card_h - 34) - (top + 48)
-        row_h = max(16, min(28, avail // max(1, len(names)) - 2))
+        row_h = max(17, min(28, avail // max(1, len(names)) - 2))
         # trait group headers
         x = area.x + name_w
         for trait, vals in TRAITS.items():
@@ -498,8 +504,14 @@ class PlannersTab:
         self._cells = []
         self._rows = []
         max_rows_bottom = area.bottom - card_h - 34
-        for name in names:
+        fit_rows = max(1, (max_rows_bottom - y) // (row_h + 2))
+        self.scroll = max(0, min(self.scroll, len(names) - fit_rows))
+        self._matrix_rect = pygame.Rect(area.x, y, area.width, max_rows_bottom - y)
+        shown = names[self.scroll :]
+        self._hidden = 0
+        for k, name in enumerate(shown):
             if y + row_h > max_rows_bottom:
+                self._hidden = len(shown) - k
                 break
             row = pygame.Rect(area.x, y, name_w + col_w * len(columns), row_h)
             if name == self.selected:
@@ -525,6 +537,10 @@ class PlannersTab:
         if not names:
             _text(surface, "No planner is designed for this yet.", (area.x, y + 4), m.small, PANEL_MUTED)
             y += 26
+        if self.scroll or self._hidden:
+            hint = f"{self.scroll} above, {self._hidden} below: scroll the wheel over the table"
+            img = m.small.render(hint, True, PANEL_MUTED)
+            surface.blit(img, img.get_rect(topright=(area.right - 4, area.y + 30)))
 
         # hover note
         note_y = max_rows_bottom + 4
