@@ -138,7 +138,14 @@ class SamplingPlanner(BasePathfinder):
         t0 = time.perf_counter()
         start = starts[0]
         grid = plan_grid(belief, self.agent_radius, self.resolution)
-        space = FreeSpace(grid, (start, goal), exempt_r=grid.cell_size * 1.5)
+        # Only a start / goal that sits in a blocked cell (inside the inflated margin)
+        # gets a small exempt zone to leave / reach it; otherwise walls are walls.
+        def stuck(p: Vec2) -> bool:
+            c = grid.to_cell(p)
+            return bool(grid.blocked[c.y, c.x])
+
+        exempt = [p for p in (start, goal) if stuck(p)]
+        space = FreeSpace(grid, exempt, exempt_r=grid.cell_size * 1.5)
         # str hashes change per process, so build the seed from a stable checksum
         key = f"{self.name}:{start.x:.2f}:{start.y:.2f}:{goal.x:.2f}:{goal.y:.2f}"
         seed = zlib.crc32(key.encode())

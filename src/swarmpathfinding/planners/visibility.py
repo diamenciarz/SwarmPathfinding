@@ -52,7 +52,8 @@ class VisGeometry:
         for p in polys:
             if p.is_empty:
                 continue
-            ring = p.buffer(radius + CORNER, join_style="mitre", mitre_limit=1.6)
+            # simplify drops collinear points (merged grid cells leave one per cell edge)
+            ring = p.buffer(radius + CORNER, join_style="mitre", mitre_limit=1.6).simplify(1e-6)
             for part in getattr(ring, "geoms", [ring]):
                 nodes.extend(_convex_corners(part))
         arr = np.array(nodes, dtype=float).reshape(-1, 6)  # corner, previous corner, next corner
@@ -100,12 +101,13 @@ class VisGeometry:
         if i is not None:
             c1 = d[:, 0] * (self.prev[i, 1] - a[1]) - d[:, 1] * (self.prev[i, 0] - a[0])
             c2 = d[:, 0] * (self.next[i, 1] - a[1]) - d[:, 1] * (self.next[i, 0] - a[0])
-            ok &= c1 * c2 >= -1e-9
+            ok &= (c1 * c2 >= -1e-9) | (np.minimum(np.abs(c1), np.abs(c2)) <= 1e-3 * (np.abs(d).sum(1) + 1.0))
         pj, nj = self.prev[idx], self.next[idx]
         e = a - others  # direction from each corner j back to a
         c1 = e[:, 0] * (pj[:, 1] - others[:, 1]) - e[:, 1] * (pj[:, 0] - others[:, 0])
         c2 = e[:, 0] * (nj[:, 1] - others[:, 1]) - e[:, 1] * (nj[:, 0] - others[:, 0])
-        ok &= c1 * c2 >= -1e-9
+        # nearly collinear with an edge counts as tangent (agents slide along walls)
+        ok &= (c1 * c2 >= -1e-9) | (np.minimum(np.abs(c1), np.abs(c2)) <= 1e-3 * (np.abs(e).sum(1) + 1.0))
         return ok
 
     def inside(self, p: np.ndarray) -> bool:
