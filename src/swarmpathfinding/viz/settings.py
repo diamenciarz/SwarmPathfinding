@@ -25,6 +25,7 @@ class LabSettings:
     changes: str = "none"
     edit_at: float = 3.0
     show_search: bool = False
+    avoidance: str = "none"
 
     @classmethod
     def from_spec(cls, spec: ScenarioSpec, planner: str = "weighted_a_star") -> LabSettings:
@@ -117,6 +118,7 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
     parser.add_argument("--los", dest="los", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--changes", choices=("none", "slow_edit"), default=None)
     parser.add_argument("--edit-at", dest="edit_at", type=float, default=None)
+    parser.add_argument("--avoidance", choices=("none", "orca"), default=None, help="local collision avoidance")
     parser.add_argument(
         "--show-search", dest="show_search", action=argparse.BooleanOptionalAction, default=None
     )
@@ -151,6 +153,7 @@ def parse_lab_args(argv: list[str] | None = None) -> LabSettings:
         "changes",
         "edit_at",
         "show_search",
+        "avoidance",
     ):
         value = getattr(args, name)
         if value is not None and value != "":
@@ -180,6 +183,8 @@ def apply_settings(panel: SidePanel, settings: LabSettings) -> None:
     _set_check(panel, "show_search", settings.show_search)
     if any(w.key == "changes" for w in panel.widgets):
         _set_cycle(panel, "changes", settings.changes)
+    if any(w.key == "avoidance" for w in panel.widgets):
+        _set_cycle(panel, "avoidance", settings.avoidance)
 
 
 def _set_cycle(panel: SidePanel, key: str, value: str) -> None:

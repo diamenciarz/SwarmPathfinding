@@ -62,6 +62,9 @@ class SimConfig:
     # seconds. With "none" it stays available for a manual edit (E in the live lab).
     changes: str = "none"
     edit_at: float = 3.0
+    # Local collision avoidance between agents, on top of the planner's route:
+    # "none" (agents pass through each other on grids, push on polygons) or "orca".
+    avoidance: str = "none"
 
     def with_(self, **kwargs: Any) -> SimConfig:
         return replace(self, **kwargs)
@@ -83,6 +86,8 @@ class SimStats:
     plan_ms_after_edit: float = 0.0
     travelled: dict[int, float] = field(default_factory=dict)
     arrived_at: dict[int, float] = field(default_factory=dict)
+    # agent-pair seconds spent overlapping (closer than two radii), arrived agents excluded
+    overlap_s: float = 0.0
 
 
 class Simulation:
@@ -108,6 +113,7 @@ class Simulation:
         self.dirty: list[int] = []
         self.plan_ms = 0.0
         self.record_focus_trace = False
+        self.orca_debug = None  # OrcaDebug for the focus agent, when avoidance runs
         self.stats = SimStats()
         self.rebuild()
 
@@ -382,6 +388,7 @@ class Simulation:
                         agent.look_at(wps[0])
         for agent in sc.agents:
             self.stats.travelled[agent.id] = self.stats.travelled.get(agent.id, 0.0) + agent.pos.dist(before[agent.id])
+        self._count_overlaps(dt)
         if (
             self.config.changes == "slow_edit"
             and sc.pending_edit is not None
@@ -403,36 +410,102 @@ class Simulation:
             self.step(dt, sync_plans=True)
         return self.done
 
+    @property
+    def avoidance(self) -> str:
+        if getattr(self.planner, "forces_avoidance", False):
+            return "orca"
+        return self.config.avoidance
+
     def _move_agents(self, dt: float) -> None:
         sc = self.scenario
         assert sc is not None
         world = sc.world
-        for agent in sc.agents:
+        agents = sc.agents
+        pref = np.zeros((len(agents), 2))
+        has_target = [False] * len(agents)
+        avoid = self.avoidance == "orca" and len(agents) > 1
+        parked = [a for a in agents if self.arrived(a)] if avoid else []
+        for k, agent in enumerate(agents):
             wps = self.waypoints.get(agent.id) or []
             while len(wps) > 1 and agent.pos.dist(wps[0]) < WAYPOINT_EPS:
                 wps.pop(0)
             if wps and agent.pos.dist(wps[0]) < WAYPOINT_EPS * 0.5:
                 wps.pop(0)
+            if avoid and wps:
+                # Pushed off the path by a neighbour: skip waypoints already passed
+                # instead of walking back to them (that jams a crowd).
+                while len(wps) > 1 and self._passed(agent.pos, wps[0], wps[1]):
+                    wps.pop(0)
+                # A crowd cannot all stand on one goal point: an agent on its last leg
+                # that touches an agent already parked at the same goal has arrived
+                # (the usual RTS "bump an arrived unit" rule).
+                # Arrival also counts once the body covers the goal point, so the
+                # first agent there is not boxed out by neighbours 0.1 short of it.
+                if len(wps) == 1 and (agent.pos.dist(wps[0]) < agent.radius or self._touches_parked(agent, parked)):
+                    wps.pop(0)
             if not wps:
-                if agent.body is not None:
-                    agent.body.velocity = (0, 0)
                 continue
             target = wps[0]
             delta = target - agent.pos
             dist = delta.length()
             agent.look_at(target)
+            v = delta.normalized() * min(AGENT_SPEED, dist / max(dt, 1e-6))
+            pref[k] = (v.x, v.y)
+            has_target[k] = True
+        vel = pref
+        self.orca_debug = None
+        if avoid:
+            from swarmpathfinding.sim.orca import orca_step
+
+            pos = np.array([(a.pos.x, a.pos.y) for a in agents])
+            cur = np.array([(a.vel.x, a.vel.y) for a in agents])
+            active = np.array([not self.arrived(a) for a in agents])
+            vel, self.orca_debug = orca_step(pos, cur, pref, active, agents[0].radius, AGENT_SPEED, dt, debug_agent=0)
+        for k, agent in enumerate(agents):
+            vx, vy = float(vel[k, 0]), float(vel[k, 1])
             if agent.body is not None:
-                speed = min(AGENT_SPEED, dist / max(dt, 1e-6))
-                v = delta.normalized() * speed
-                agent.body.velocity = (v.x, v.y)
+                agent.body.velocity = (vx, vy)
                 continue
             assert isinstance(world, GridWorld)
-            step = delta.normalized() * min(AGENT_SPEED * dt, dist)
+            if not has_target[k] and vx == 0.0 and vy == 0.0:
+                agent.vel = Vec2(0.0, 0.0)
+                continue
+            step = Vec2(vx * dt, vy * dt)
+            before = agent.pos
             moved = self._grid_move(world, agent.pos, step)
-            if moved == agent.pos and agent.id not in self.dirty:
+            if has_target[k] and step.length_sq() > 1e-12 and moved == before and agent.id not in self.dirty:
                 # Walked into something: replan from here.
                 self.dirty.append(agent.id)
             agent.pos = moved
+            agent.vel = (moved - before) * (1.0 / max(dt, 1e-6))
+
+    @staticmethod
+    def _passed(pos: Vec2, w0: Vec2, w1: Vec2) -> bool:
+        """Is `pos` already beyond waypoint w0 on the leg to w1 (and still near
+        it, so a waypoint across a wall is never skipped)?"""
+        leg = w1 - w0
+        off = pos - w0
+        return off.length_sq() < 1.0 and off.x * leg.x + off.y * leg.y > 0.0
+
+    def _touches_parked(self, agent, parked: list) -> bool:
+        goal = self.goal_for(agent)
+        reach = (2 * agent.radius + 0.1) ** 2
+        return any(
+            other.pos.dist_sq(agent.pos) <= reach and self.goal_for(other).dist_sq(goal) < 1e-6
+            for other in parked
+        )
+
+    def _count_overlaps(self, dt: float) -> None:
+        sc = self.scenario
+        assert sc is not None
+        live = [a for a in sc.agents if not self.arrived(a)]
+        if len(live) < 2:
+            return
+        pos = np.array([(a.pos.x, a.pos.y) for a in live])
+        d2 = ((pos[:, None, :] - pos[None, :, :]) ** 2).sum(-1)
+        lim = (2 * live[0].radius * 0.95) ** 2
+        pairs = int(np.count_nonzero(np.triu(d2 < lim, 1)))
+        self.stats.overlap_s += pairs * dt
 
     def _grid_move(self, world: GridWorld, pos: Vec2, step: Vec2) -> Vec2:
         """Move on the true grid; a wall stops the agent (and is felt, i.e. remembered)."""

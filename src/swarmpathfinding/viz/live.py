@@ -29,7 +29,8 @@ from swarmpathfinding.viz.draw import (
     draw_vision_union,
 )
 from swarmpathfinding.viz.colors import PANE_EDGE
-from swarmpathfinding.viz.menu import MenuOverlay, planner_label, set_form_values
+from swarmpathfinding.viz.menu import AVOID_LABEL, MenuOverlay, planner_label, set_form_values
+from swarmpathfinding.viz.orca_view import draw_orca
 from swarmpathfinding.viz.search_view import HEATMAPS, SearchBar, SearchPlayer, draw_inspector, draw_search_state
 from swarmpathfinding.viz.panel import Check, Cycle, SidePanel, Slider
 from swarmpathfinding.viz.settings import LabSettings, apply_settings, parse_lab_args
@@ -56,6 +57,7 @@ HELP = [
 ]
 # Panel keys that only change how the search is drawn.
 VIEW_KEYS = {"heatmap", "show_open", "show_closed", "arrows", "inspector"}
+DRAW_ONLY_KEYS = {"show_orca"}
 STRIP_H = 26  # compare-mode metrics strip
 # Panel keys that make up a SimConfig.
 SIM_KEYS = tuple(SimConfig.__dataclass_fields__)
@@ -255,6 +257,8 @@ class LiveApp:
             Slider("vision_radius", "Vision radius", 2.0, 16.0, 6.0, section="Swarm"),
             Check("fow", "Fog of war", True, section="Swarm"),
             Check("los", "Vision needs LOS", True, section="Swarm", hint="grid only"),
+            Cycle("avoidance", "Avoidance", ["none", "orca"], 0, section="Swarm", display=AVOID_LABEL),
+            Check("show_orca", "Show ORCA (focus agent)", True, section="Swarm"),
             Cycle("planner", "Planner", planners, planners.index(default_planner), section="Planner"),
             Slider("w", "Weight w", 1.0, 3.0, 1.0, section="Planner"),
             Check("show_search", "Show search", False, section="Planner"),
@@ -281,7 +285,7 @@ class LiveApp:
         self._sync_panel_state()
         if not final:
             return
-        if key in VIEW_KEYS:
+        if key in VIEW_KEYS or key in DRAW_ONLY_KEYS:
             return
         self.cancel_visual_bench()
         value = self.panel.get(key).value
@@ -290,6 +294,10 @@ class LiveApp:
                 sim.record_focus_trace = bool(value)
                 sim.replan_all(sync=True)
             self._reset_players()
+            return
+        if key == "avoidance":
+            for sim in self.panes:  # switches live: same map, same moment
+                sim.config.avoidance = value
             return
         if key == "los":
             for sim in self.panes:
@@ -316,6 +324,9 @@ class LiveApp:
         for key in VIEW_KEYS:
             self.panel.get(key).visible = has_search and bool(vals["show_search"])
         self.panel.get("vision_radius").enabled = vals["vision"] != "none"
+        forced = any(getattr(_planner_class(p), "forces_avoidance", False) for p in self._pane_planners(vals["planner"]))
+        self.panel.get("avoidance").enabled = not forced
+        self.panel.get("show_orca").visible = forced or vals["avoidance"] == "orca"
         self.panel.get("density").visible = vals["map_kind"] in DENSITY_MAPS
 
     def _pane_planners(self, first: str) -> list[str]:
@@ -643,6 +654,8 @@ class LiveApp:
         for g in goals.values():
             draw_goal(surface, camera, g)
         draw_agents(surface, camera, sc.agents, focus=fid)
+        if vals.get("show_orca"):
+            draw_orca(surface, camera, sim)  # no-op unless avoidance is running
 
     def _pane_label(self, surface: pygame.Surface, sim: Simulation) -> None:
         img = self.font.render(planner_label(sim.config.planner), True, PANEL_FG)
