@@ -164,7 +164,12 @@ def test_hover_note_draws():
     app = _app()
     app.open_menu(tab=1)
     app.draw()
-    cell = next(c for c in app.menu.planners._cells if c[1] == "weighted_a_star" and c[3] == "fog")
+    tab = app.menu.planners
+    while not any(c[1] == "weighted_a_star" for c in tab._cells):  # last row: scroll to it
+        pygame.mouse.set_pos(tab._matrix_rect.center)
+        tab.scroll += 1
+        app.draw()
+    cell = next(c for c in tab._cells if c[1] == "weighted_a_star" and c[3] == "fog")
     app.handle(pygame.event.Event(pygame.MOUSEMOTION, pos=cell[0].center, rel=(0, 0), buttons=(0, 0, 0)))
     assert app.menu.planners.hover == ("weighted_a_star", "knowledge", "fog")
     app.draw()
@@ -276,3 +281,19 @@ def test_chips_and_range_widgets():
     app.handle(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(rng.rect.centerx, rng.rect.centery), button=1))
     lo, hi = rng.value
     assert lo == 1 and 40 < hi < 60
+
+
+def test_planner_matrix_scrolls_with_the_wheel(monkeypatch):
+    app = _app()
+    app.open_menu(tab=1)
+    app.draw()
+    tab = app.menu.planners
+    if not tab._hidden:
+        return  # everything fits in this window
+    monkeypatch.setattr(pygame.mouse, "get_pos", lambda: tab._matrix_rect.center)
+    first = tab._rows[0][1]
+    app.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=-1))
+    app.draw()
+    assert tab.scroll == 1 and tab._rows[0][1] != first
+    app.handle(pygame.event.Event(pygame.MOUSEWHEEL, x=0, y=5))
+    assert tab.scroll == 0
