@@ -281,6 +281,7 @@ class Simulation:
         focus = self.focus_id()
         t0 = time.perf_counter()
         cache: dict[tuple, PathResult] = {}
+        incremental = bool(getattr(self.planner, "incremental", False))
         done = 0
         while self.dirty:
             if budget_ms is not None and done and (time.perf_counter() - t0) * 1000.0 > budget_ms:
@@ -292,10 +293,11 @@ class Simulation:
             goal = self.goal_for(agent)
             record = self.record_focus_trace and aid == focus
             key = (round(agent.pos.x * 2), round(agent.pos.y * 2), goal.x, goal.y)
-            result = None if record else cache.get(key)
+            # incremental planners keep per-agent state, so they never share a result
+            result = None if record or incremental else cache.get(key)
             if result is None:
                 t1 = time.perf_counter()
-                budget = Budget(weight=self.config.w, record_trace=record)
+                budget = Budget(weight=self.config.w, record_trace=record, agent_id=aid)
                 result = self.planner.plan(sc.belief, [agent.pos], goal, budget)
                 if not result.runtime_ms:
                     result.runtime_ms = (time.perf_counter() - t1) * 1000.0

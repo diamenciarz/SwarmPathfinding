@@ -50,9 +50,9 @@ HELP = [
     (".", "step"),
     ("R", "restart"),
     ("Esc", "quit"),
-    ("P", "replay search"),
-    ("<- ->", "search step"),
-    ("C", "end compare"),
+    ("P", "replay"),
+    ("L/R", "replay step"),
+    ("C", "1 pane"),
 ]
 # Panel keys that only change how the search is drawn.
 VIEW_KEYS = {"heatmap", "show_open", "show_closed", "arrows", "inspector"}

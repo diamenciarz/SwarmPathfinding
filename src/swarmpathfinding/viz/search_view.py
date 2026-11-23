@@ -28,12 +28,13 @@ from swarmpathfinding.viz.colors import (
     SEARCH_OPEN,
     SEARCH_PARENT,
     SEARCH_SCAN,
+    SEARCH_KEPT,
     LOS_BLOCKED,
     LOS_CLEAR,
 )
 from swarmpathfinding.viz.draw import blit_cells
 
-UNSEEN, OPEN, CLOSED, SCANNED = 0, 1, 2, 3
+UNSEEN, OPEN, CLOSED, SCANNED, KEPT = 0, 1, 2, 3, 4
 SPEEDS = (5, 20, 100, 500, 2000)  # expansions per second
 HEATMAPS = ("off", "g", "h", "f")
 
@@ -73,6 +74,12 @@ class SearchPlayer:
         self.h = np.full(shape, np.nan, dtype=np.float32)
         self.f = np.full(shape, np.nan, dtype=np.float32)
         self.parent = np.full((*shape, 2), -1, dtype=np.int32)
+        self.rhs = np.full(shape, np.nan, dtype=np.float32)
+        base = getattr(self.trace, "base_g", None) if self.trace is not None else None
+        if base is not None and base.shape == shape:
+            # incremental planner: start from the tree it kept from earlier calls
+            self.g[:] = base
+            self.state[~np.isnan(base)] = KEPT
         self.order = np.full(shape, -1, dtype=np.int32)
         self.expanded = 0
         self.current: tuple[int, int] | None = None
@@ -139,9 +146,16 @@ class SearchPlayer:
             self.los = []
         elif k == PUSH and self.state[y, x] != CLOSED:
             self.state[y, x] = OPEN
-        if k in (PUSH, UPDATE, EXPAND):
-            self.g[y, x] = tr.g[i]
-            self.f[y, x] = tr.f[i]
+        if k == UPDATE:
+            v = tr.g[i]
+            self.rhs[y, x] = v if math.isfinite(v) else np.nan
+            if self.state[y, x] in (UNSEEN, KEPT):
+                self.state[y, x] = OPEN
+            return
+        if k in (PUSH, EXPAND):
+            gv, fv = tr.g[i], tr.f[i]
+            self.g[y, x] = gv if math.isfinite(gv) else np.nan
+            self.f[y, x] = fv if math.isfinite(fv) else np.nan
             if i < len(tr.h):
                 self.h[y, x] = tr.h[i]
                 if tr.px[i] >= 0:
@@ -215,11 +229,15 @@ class SearchPlayer:
         if not (0 <= y < self.shape[0] and 0 <= x < self.shape[1]):
             return None
         st = int(self.state[y, x])
-        rows = [("cell", f"({x}, {y})"), ("state", ("not reached", "open", "closed", "scanned")[st])]
+        rows = [("cell", f"({x}, {y})"), ("state", ("not reached", "open", "closed", "scanned", "kept from last search")[st])]
+        if st == KEPT:
+            rows.append(("g", _f(self.g[y, x])))
         if st in (OPEN, CLOSED):
             rows += [("g", _f(self.g[y, x])), ("h", _f(self.h[y, x])), ("f", _f(self.f[y, x]))]
             px, py = self.parent[y, x]
             rows.append(("parent", f"({px}, {py})" if px >= 0 else "start"))
+            if not math.isnan(self.rhs[y, x]):
+                rows.append(("rhs", _f(self.rhs[y, x])))
         if self.order[y, x] >= 0:
             rows.append(("expanded", f"#{int(self.order[y, x]) + 1}"))
         return rows
@@ -248,7 +266,7 @@ def draw_search_state(
     rgba = np.zeros((*st.shape, 4), dtype=np.uint8)
     if heatmap in ("g", "h", "f"):
         vals = getattr(player, heatmap)
-        mask = ((st == OPEN) | (st == CLOSED)) & ~np.isnan(vals)
+        mask = ((st == OPEN) | (st == CLOSED) | (st == KEPT)) & ~np.isnan(vals)
         if mask.any():
             lo, hi = float(np.nanmin(vals[mask])), float(np.nanmax(vals[mask]))
             t = (vals - lo) / max(1e-9, hi - lo)
@@ -257,6 +275,7 @@ def draw_search_state(
             rgba[mask, 3] = 170
     else:
         rgba[st == SCANNED] = SEARCH_SCAN
+        rgba[st == KEPT] = SEARCH_KEPT
         if show_closed:
             rgba[st == CLOSED] = SEARCH
         if show_open:

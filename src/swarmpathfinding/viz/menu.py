@@ -469,7 +469,8 @@ class PlannersTab:
         card_h = 150
         top = area.y + 44
         col_w = (area.width - name_w) // len(columns)
-        row_h = 28
+        avail = (area.bottom - card_h - 34) - (top + 48)
+        row_h = max(16, min(28, avail // max(1, len(names)) - 2))
         # trait group headers
         x = area.x + name_w
         for trait, vals in TRAITS.items():
@@ -547,7 +548,8 @@ class PlannersTab:
         ptxt = ", ".join(f"{p[0]} = {p[1]} ({p[2]:g} to {p[3]:g})" for p in params) or "none"
         y = _text(surface, f"Parameters: {ptxt}", (x, y + 4), m.small, PANEL_MUTED)
         overlays = getattr(cls, "overlays", ()) or ()
-        _text(surface, f"Debug views: {', '.join(overlays) or 'none yet'}", (x, y), m.small, PANEL_MUTED)
+        for ln in wrap(f"Debug views: {', '.join(overlays) or 'none yet'}", m.small, rect.width - 28)[:3]:
+            y = _text(surface, ln, (x, y), m.small, PANEL_MUTED)
         comp = compatibility(self.selected, live)
         self._use_rect = pygame.Rect(rect.right - 224, rect.y + 12, 210, 30)
         _button(surface, self._use_rect, "Use in current scenario", m.small, mouse, primary=True, enabled=comp.runnable)
