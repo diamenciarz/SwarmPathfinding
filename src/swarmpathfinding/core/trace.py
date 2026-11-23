@@ -14,7 +14,9 @@ import numpy as np
 PUSH = 0  # cell added to (or improved in) the open set
 EXPAND = 1  # cell taken off the open set and expanded (closed)
 UPDATE = 2  # a cost value changed without a push (e.g. D* Lite rhs)
-KIND_NAMES = {PUSH: "push", EXPAND: "expand", UPDATE: "update"}
+SCAN = 3  # a cell looked at without being queued (e.g. a JPS jump scan)
+LOS = 4  # a line-of-sight test from (px, py) to (x, y); g = 1 if clear, 0 if blocked
+KIND_NAMES = {PUSH: "push", EXPAND: "expand", UPDATE: "update", SCAN: "scan", LOS: "line of sight"}
 
 
 @dataclass(slots=True)
