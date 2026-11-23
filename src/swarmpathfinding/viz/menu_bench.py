@@ -174,6 +174,7 @@ class BenchmarkTab:
             Range("edit_at", "Edit at (s)", 0.5, 30.0, (1.0, 6.0), section="Scenarios"),
             Chips("planners", "Planners", planners, set(defaults), section="Planners", display={p: _label(p) for p in planners}),
             Slider("w", "Weight w (weighted A*)", 1.0, 3.0, 1.0, section="Planners"),
+            Chips("avoidance", "Avoidance (each planner runs once per pick)", ["none", "orca"], {"none"}, section="Planners", display={"orca": "ORCA"}),
         ]
         f.set_on_change(self._on_change)
         self.form = f
@@ -207,6 +208,7 @@ class BenchmarkTab:
             vision_radius=tuple(v["vision_radius"]),
             edit_at=tuple(v["edit_at"]),
             w=float(v["w"]),
+            avoidance=v["avoidance"],
             time_limit=float(v["time_limit"]),
         )
 
@@ -296,7 +298,9 @@ class BenchmarkTab:
                 y = _text(surface, f"Cannot run yet: {p}", (r.x, y), m.small, FIT_CANNOT)
         else:
             n, skipped, sample = self.preview()
-            line = f"{spec.n_scenarios} scenarios x {len(spec.planners)} planners = {n} trials"
+            runs = sum(len(spec.variants(p)) for p in spec.planners)
+            what = "planners" if runs == len(spec.planners) else "planner runs"
+            line = f"{spec.n_scenarios} scenarios x {runs} {what} = {n} trials"
             y = _text(surface, line, (r.x, y), m.font, PANEL_FG)
             sub = f"same seeds for every planner (seed {spec.base_seed} to {spec.base_seed + spec.n_scenarios - 1})"
             if skipped:
@@ -390,7 +394,7 @@ class ResultsTab:
         for k, f in SimConfig.__dataclass_fields__.items():
             if k in row and row[k] != "":
                 cfg[k] = _coerce(row[k], f.default)
-        cfg["planner"] = planner
+        cfg["planner"] = row.get("algo") or planner.partition("+")[0]
         self.menu.on_apply(cfg)
         self.menu.toast = f"Loaded trial scenario {scenario} with {_label(planner)}"
         self.menu.close()
@@ -463,7 +467,7 @@ class ResultsTab:
     def _draw_summary(self, surface, rect, rows, colors) -> None:
         m = self.menu
         summ = A.summary(rows)
-        cols = [("trials", "trials", None), ("wins", "wins", False), ("success", "success", False), ("makespan", "makespan s", True), ("path_len", "path", True), ("plan_ms", "plan ms", True), ("expansions", "expanded", True)]
+        cols = [("trials", "trials", None), ("wins", "wins", False), ("success", "success", False), ("makespan", "makespan s", True), ("path_len", "path", True), ("plan_ms", "plan ms", True), ("expansions", "expanded", True), ("overlap_s", "overlap s", True)]
         y = _text(surface, "SUMMARY  (means over trials that ran; failures count as the time limit)", (rect.x, rect.y), m.small, ACCENT) + 4
         name_w = 180
         col_w = (rect.width - name_w) // len(cols)

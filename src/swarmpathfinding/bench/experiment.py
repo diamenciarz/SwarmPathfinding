@@ -33,6 +33,7 @@ METRICS: tuple[tuple[str, str, bool], ...] = (
     ("plan_ms", "planning ms", True),
     ("expansions", "expansions", True),
     ("plans", "plans", True),
+    ("overlap_s", "overlap s", True),
     ("wall_s", "wall time s", True),
 )
 
@@ -57,6 +58,8 @@ class ExperimentSpec:
     vision_radius: tuple[float, float] = (4.0, 10.0)
     edit_at: tuple[float, float] = (1.0, 6.0)
     w: float = 1.0
+    # local avoidance variants: every planner runs once per value ("a_star+orca")
+    avoidance: list[str] = field(default_factory=lambda: ["none"])
     time_limit: float = 60.0  # simulated seconds per trial
 
     def as_dict(self) -> dict[str, Any]:
@@ -121,8 +124,18 @@ class ExperimentSpec:
             traits = scenario_traits(cfg)
             for p in self.planners:
                 runnable = compatibility(p, traits).runnable
-                out.append(Trial(len(out), i, p, cfg.with_(planner=p), skipped=not runnable))
+                for av in self.variants(p):
+                    label = variant_label(p, av)
+                    out.append(Trial(len(out), i, label, cfg.with_(planner=p, avoidance=av), skipped=not runnable))
         return out
+
+    def variants(self, planner: str) -> list[str]:
+        """Avoidance values a planner runs with. Planners with avoidance built in
+        (ORCA itself) run once."""
+        avs = [a for a in self.avoidance if a in AVOIDANCE] or ["none"]
+        if planner_forces_avoidance(planner):
+            return ["none"]
+        return avs
 
 
 @dataclass(slots=True)
@@ -132,6 +145,27 @@ class Trial:
     planner: str
     config: SimConfig
     skipped: bool = False
+
+
+AVOIDANCE = ("none", "orca")
+
+
+def variant_label(planner: str, avoidance: str) -> str:
+    """Name a planner + avoidance pair the way results tables show it."""
+    return planner if avoidance == "none" else f"{planner}+{avoidance}"
+
+
+def split_variant(label: str) -> tuple[str, str]:
+    """Inverse of variant_label."""
+    base, _, av = label.partition("+")
+    return base, (av or "none")
+
+
+def planner_forces_avoidance(planner: str) -> bool:
+    from swarmpathfinding.core.registry import _REGISTRY, ensure_builtin_planners
+
+    ensure_builtin_planners()
+    return bool(getattr(_REGISTRY.get(planner), "forces_avoidance", False))
 
 
 def run_trial(config: SimConfig, time_limit: float = 60.0, dt: float = DT) -> dict[str, Any]:
@@ -161,6 +195,7 @@ def trial_metrics(sim: Simulation, time_limit: float, wall_s: float) -> dict[str
         "plans": int(st.plans),
         "plan_failures": int(st.plan_failures),
         "plan_ms_after_edit": round(st.plan_ms_after_edit, 3),
+        "overlap_s": round(st.overlap_s, 3),
         "sim_time": round(sim.now, 3),
         "wall_s": round(wall_s, 3),
     }
@@ -176,6 +211,7 @@ def row_for(trial: Trial, metrics: dict[str, Any] | None) -> dict[str, Any]:
     """One CSV / results row: ids, scenario settings, traits, then metrics."""
     cfg = trial.config.as_dict()
     row: dict[str, Any] = {"trial": trial.trial_id, "scenario": trial.scenario, "planner": trial.planner}
+    row["algo"] = trial.config.planner  # the registered planner behind the label
     row.update({k: v for k, v in cfg.items() if k != "planner"})
     row.update({f"trait_{k}": v for k, v in scenario_traits(trial.config).items()})
     row["skipped"] = int(trial.skipped)

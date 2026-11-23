@@ -69,6 +69,8 @@ SHORT = {
 }
 DENSITY_MAPS = {"bernoulli", "clustered", "open", "polygons", "sparse", "clutter"}
 
+AVOID_LABEL = {"none": "none", "orca": "ORCA (agents dodge)"}
+
 # Keys of the scenario form, i.e. the SimConfig fields the menu controls.
 FORM_KEYS = (
     "world_kind",
@@ -83,6 +85,7 @@ FORM_KEYS = (
     "los",
     "changes",
     "edit_at",
+    "avoidance",
 )
 
 ApplyFn = Callable[[dict], None]
@@ -156,8 +159,10 @@ def planner_class(name: str):
 
 
 def planner_label(name: str) -> str:
-    cls = planner_class(name)
-    return getattr(cls, "label", None) or name.replace("_", " ")
+    base, _, avoid = name.partition("+")  # benchmark variants like "a_star+orca"
+    cls = planner_class(base)
+    label = getattr(cls, "label", None) or base.replace("_", " ")
+    return f"{label} + {avoid.upper()}" if avoid else label
 
 
 # ---------------------------------------------------------------- tabs
@@ -193,6 +198,7 @@ class ScenarioTab:
                 display={"none": "none (E = manual)", "slow_edit": "auto edit"},
             ),
             Slider("edit_at", "Edit at (s)", 0.5, 30.0, 3.0, section="Changes"),
+            Cycle("avoidance", "Avoidance", ["none", "orca"], 0, section="Swarm", display=AVOID_LABEL),
         ]
         self.form.set_on_change(self._on_change)
         self.planner = "weighted_a_star"
