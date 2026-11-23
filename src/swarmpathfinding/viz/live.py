@@ -82,7 +82,12 @@ class LiveApp:
         self._fit()
         self.menu = MenuOverlay(self.font, self.small, self.apply_config, lambda: self._config().as_dict())
         self.menu.on_close = self._menu_closed
+        self.menu.on_bench_start = self._bench_started
         self._paused_before_menu = True
+        self.bench_steps = 0  # sim steps per frame for a visual benchmark (0 = none)
+        self._bench_acc = 0.0
+        self.toast = ""
+        self._toast_until = 0.0
 
     # ------------------------------------------------------------------ menu
 
@@ -97,6 +102,64 @@ class LiveApp:
 
     def _menu_closed(self) -> None:
         self.paused = self._paused_before_menu
+        if self.menu.toast:
+            self.show_toast(self.menu.toast)
+            self.menu.toast = ""
+
+    def show_toast(self, text: str, seconds: float = 4.0) -> None:
+        self.toast = text
+        self._toast_until = pygame.time.get_ticks() / 1000.0 + seconds
+
+    # ------------------------------------------------------------------ benchmark
+
+    @property
+    def runner(self):
+        return self.menu.runner
+
+    def visual_bench_active(self) -> bool:
+        r = self.menu.runner
+        return r is not None and r.mode == "visual" and r.running
+
+    def _bench_started(self, runner, mode: str) -> None:
+        from swarmpathfinding.bench.runner import SPEEDS
+
+        if runner.mode != "visual":
+            self.bench_steps = 0
+            return
+        self.bench_steps = SPEEDS.get(mode, 4)
+        self._bench_acc = 0.0
+        self._paused_before_menu = False
+        self.menu.close()
+
+    def cancel_visual_bench(self) -> None:
+        if self.visual_bench_active():
+            self.menu.runner.cancel()
+            self.show_toast("Benchmark cancelled")
+
+    def _bench_tick(self, dt: float) -> None:
+        from swarmpathfinding.bench.experiment import DT
+
+        runner = self.menu.runner
+        if runner is None or not runner.running:
+            return
+        if runner.mode != "visual":
+            runner.poll()
+            return
+        if self.paused:
+            return
+        if self.bench_steps >= 1000:
+            steps = 1_000_000  # bounded by the per-frame time budget
+        else:
+            self._bench_acc += self.bench_steps * dt / DT
+            steps = int(self._bench_acc)
+            self._bench_acc -= steps
+        sim = runner.visual_step(steps)
+        if sim is not None and sim is not self.sim:
+            self.sim = sim
+            set_form_values(self.panel, {k: v for k, v in sim.config.as_dict().items() if k != "planner"})
+            self.panel.get("planner").index = self.panel.get("planner").options.index(sim.config.planner)
+            self._sync_panel_state()
+            self._fit()
 
     def apply_config(self, values: dict) -> None:
         """Load menu values into the live view. Only a planner change keeps the map."""
@@ -135,6 +198,7 @@ class LiveApp:
         self.camera.fit(size.x, size.y)
 
     def rebuild(self) -> None:
+        self.cancel_visual_bench()
         self.sim.rebuild(self._config())
         self._fit()
 
@@ -185,6 +249,7 @@ class LiveApp:
         self._sync_panel_state()
         if not final:
             return
+        self.cancel_visual_bench()
         value = self.panel.get(key).value
         if key == "show_search":
             self.sim.record_focus_trace = bool(value)
@@ -221,6 +286,10 @@ class LiveApp:
     # ------------------------------------------------------------------ simulation
 
     def tick(self, dt: float) -> None:
+        if self.menu.runner is not None:
+            self._bench_tick(dt)
+            if self.visual_bench_active():
+                return
         if self.paused:
             return
         self.step(dt)
@@ -232,7 +301,7 @@ class LiveApp:
 
     def _click_world(self, button: int, pos: tuple[int, int]) -> None:
         sc = self.scenario
-        if sc is None:
+        if sc is None or self.visual_bench_active():
             return
         world_pt = self.camera.screen_to_world(*pos)
         size = sc.world.world_size
@@ -271,6 +340,9 @@ class LiveApp:
             return True
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
+                if self.visual_bench_active():
+                    self.cancel_visual_bench()
+                    return True
                 return False
             if event.key == pygame.K_SPACE:
                 self.paused = not self.paused
@@ -317,7 +389,7 @@ class LiveApp:
             return
         world = sc.world
         vals = self.panel.values()
-        fow = bool(vals["fow"])
+        fow = bool(self.sim.config.fow)
         focus = self.results.get(self.sim.focus_id())
         if isinstance(world, GridWorld):
             if fow:
@@ -348,7 +420,16 @@ class LiveApp:
         for g in goals.values():
             draw_goal(world_surface, self.camera, g)
         draw_agents(world_surface, self.camera, sc.agents, focus=fid)
-        if self.place_goal:
+        now_s = pygame.time.get_ticks() / 1000.0
+        if self.visual_bench_active():
+            r = self.menu.runner
+            cur = r.current
+            what = f"scenario {cur.scenario}, {cur.planner}" if cur else "starting"
+            state = "paused, Space resumes" if self.paused else "Space pauses"
+            self._banner(world_surface, f"Benchmark {r.progress.done}/{r.progress.total} ({what}): {state}, Esc cancels")
+        elif self.toast and now_s < self._toast_until:
+            self._banner(world_surface, self.toast)
+        elif self.place_goal:
             self._banner(world_surface, "Goal mode: click to place the goal for every agent")
         elif self.paused:
             self._banner(world_surface, "Paused: press Space to run, . to step")
@@ -407,6 +488,10 @@ class LiveApp:
             ("plan", f"{sim.plan_ms:.1f} ms"),
             ("edit", edit),
         ]
+        r = self.menu.runner
+        if r is not None:
+            state = "" if r.running else (" done" if r.finished and not r.cancelled else " stop")
+            lines.append(("bench", f"{r.progress.done}/{r.progress.total}{state}"))
         self.panel.set_metrics(lines)
 
     # ------------------------------------------------------------------ loop
@@ -423,6 +508,8 @@ class LiveApp:
             if running:
                 self.tick(dt)
                 self.draw()
+        if self.menu.runner is not None and self.menu.runner.running:
+            self.menu.runner.cancel()
         pygame.quit()
         return 0
 

@@ -60,6 +60,21 @@ The live window: the world is on the left, the side panel on the right. Changing
 
 **Lab menu.** A popup over the paused view (the simulation resumes when it closes). Tab **1 Scenario**: set the scenario on the left; the right side lists every planner with a badge for how it fits this scenario (star = designed for it, check = works as is, ~ = adapted, cross = cannot) and the notes on each adaptation. Click a planner, then **Apply** (Enter) to load it all into the live view, or **Randomise** for a random scenario. Tab **2 Planners**: every planner against every scenario trait; hover a cell for the note, the highlighted column is the current scenario, and **Use in current scenario** switches planner on the same map. Planners declare these ratings in their `capabilities` dict (see `core/capabilities.py`).
 
+**Benchmarks** (menu tab **3 Benchmark**). Choose how many scenarios, the base seed, the time limit per trial (simulated seconds, default 60) and a mode, then which values each setting may take: chips for worlds, maps, starts, fog, changes, vision and planners, and two-knob ranges for density, agent count, vision radius and edit time. Scenario *i* always gets seed `base + i` and the same random settings, so every planner faces exactly the same scenarios. **Headless** runs the trials in worker processes (all CPU cores but one) while you keep using the lab; **visual x4 / x16 / max** plays each trial in the live view (Space pauses, Esc cancels). All modes give identical numbers. Progress shows as a gradient bar (`29/150`) with one bar per planner, an ETA, Pause and Cancel, and a strip along the bottom of the other tabs. Each finished trial is appended to `benches/out/lab/<time>_<name>.csv`. **Load a random scenario of it** puts a random scenario from the current settings into the live view.
+
+**Results** (tab **4**): a summary table (best value per column highlighted), a "where it wins" heatmap (for scenarios with each trait value, the share in which each planner had the best makespan; failures count as the time limit), a box plot of any metric, and the scenario list (click one to load it with its winner). **Load random trial**, **Export summary** (a `_summary.csv` next to the trial CSV) and **Open last CSV** (results from an earlier session).
+
+From Python:
+
+```python
+from swarmpathfinding.bench.experiment import ExperimentSpec
+from swarmpathfinding.bench.runner import BenchmarkRunner
+
+if __name__ == "__main__":  # needed for worker processes on Windows
+    spec = ExperimentSpec(n_scenarios=100, worlds=["grid", "continuous"], agents=(1, 30))
+    rows = BenchmarkRunner(spec, mode="headless").run_all()
+```
+
 With fog of war on, the view shows what the swarm remembers, not the truth: unknown is dark, remembered-but-not-visible is dimmed, and memories the world has since contradicted are tinted red ("stale"). In continuous worlds moving obstacles that are out of sight are drawn as yellow ghosts extrapolated along their last-seen velocity. **Show search** paints the cells the focus agent's planner expanded (agent 0, ringed in orange).
 
 Notebooks are **launchers**, not a second UI. `launch_lab(...)` blocks the kernel until you close Pygame. Use the **SwarmPathfinding** kernel (the project `.venv`).

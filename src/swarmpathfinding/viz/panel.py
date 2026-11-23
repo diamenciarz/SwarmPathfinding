@@ -19,6 +19,7 @@ from swarmpathfinding.viz.colors import (
 ROW_CYCLE = 28
 ROW_SLIDER = 32
 ROW_CHECK = 22
+CHIP_H = 22
 LABEL_W = 92
 
 
@@ -84,7 +85,82 @@ class Check:
     rect: pygame.Rect = field(default_factory=lambda: pygame.Rect(0, 0, 0, 0))
 
 
-Widget = Cycle | Slider | Check
+@dataclass(slots=True)
+class Chips:
+    """A set of toggle chips; `value` is the selected options in display order."""
+
+    key: str
+    label: str
+    options: list
+    selected: set = field(default_factory=set)
+    section: str = ""
+    visible: bool = True
+    enabled: bool = True
+    display: dict = field(default_factory=dict)
+    min_selected: int = 0
+    rects: list = field(default_factory=list)  # [(rect, option)]
+
+    @property
+    def value(self) -> list:
+        return [o for o in self.options if o in self.selected]
+
+    def shown(self, option) -> str:
+        return str(self.display.get(option, option))
+
+    def toggle(self, option) -> bool:
+        if option in self.selected:
+            if len(self.selected) <= self.min_selected:
+                return False
+            self.selected.discard(option)
+        else:
+            self.selected.add(option)
+        return True
+
+
+@dataclass(slots=True)
+class Range:
+    """A two-knob slider; `value` is (lo, hi)."""
+
+    key: str
+    label: str
+    lo: float
+    hi: float
+    value: tuple = (0.0, 1.0)
+    integer: bool = False
+    section: str = ""
+    visible: bool = True
+    enabled: bool = True
+    rect: pygame.Rect = field(default_factory=lambda: pygame.Rect(0, 0, 0, 0))
+    knob: int = 0  # knob being dragged
+
+    def _snap(self, raw: float) -> float:
+        raw = min(self.hi, max(self.lo, raw))
+        return float(int(round(raw))) if self.integer else round(raw, 2)
+
+    def x_of(self, v: float) -> int:
+        return self.rect.x + int((v - self.lo) / max(1e-9, self.hi - self.lo) * self.rect.width)
+
+    def pick_knob(self, x: int) -> None:
+        a, b = (self.x_of(v) for v in self.value)
+        self.knob = 0 if abs(x - a) < abs(x - b) or (a == b and x < a) else 1
+
+    def set_from_x(self, x: int) -> bool:
+        t = (x - self.rect.x) / max(1, self.rect.width)
+        v = self._snap(self.lo + t * (self.hi - self.lo))
+        a, b = self.value
+        new = (min(v, b), b) if self.knob == 0 else (a, max(v, a))
+        changed = new != tuple(self.value)
+        self.value = new
+        return changed
+
+    def text(self) -> str:
+        a, b = self.value
+        if self.integer:
+            return f"{int(a)} to {int(b)}"
+        return f"{a:.2f} to {b:.2f}"
+
+
+Widget = Cycle | Slider | Check | Chips | Range
 # on_change(key, final): `final` is False while a slider is being dragged.
 ChangeFn = Callable[[str, bool], None]
 
@@ -100,7 +176,7 @@ class SidePanel:
         self.small = small
         self.widgets: list[Widget] = []
         self.sections: list[str] = []
-        self._drag_slider: Slider | None = None
+        self._drag_slider: Slider | Range | None = None
         self._help: list[tuple[str, str]] = []
         self._metrics: list[tuple[str, str]] = []
         self._on_change: ChangeFn | None = None
@@ -168,11 +244,19 @@ class SidePanel:
                     w.value = not w.value
                     self._fire(w.key, True)
                     return None
-                if isinstance(w, Slider) and w.rect.inflate(0, 14).collidepoint(mx, my):
+                if isinstance(w, (Slider, Range)) and w.rect.inflate(16, 14).collidepoint(mx, my):
+                    if isinstance(w, Range):
+                        w.pick_knob(mx)
                     self._drag_slider = w
                     if w.set_from_x(mx):
                         self._fire(w.key, False)
                     return None
+                if isinstance(w, Chips):
+                    for rect, option in w.rects:
+                        if rect.collidepoint(mx, my):
+                            if w.toggle(option):
+                                self._fire(w.key, True)
+                            return None
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self._drag_slider is not None:
             slider = self._drag_slider
             self._drag_slider = None
@@ -223,6 +307,10 @@ class SidePanel:
                     y = self._draw_cycle(surface, wd, x, y, w, mouse)
                 elif isinstance(wd, Slider):
                     y = self._draw_slider(surface, wd, x, y, w)
+                elif isinstance(wd, Range):
+                    y = self._draw_range(surface, wd, x, y, w)
+                elif isinstance(wd, Chips):
+                    y = self._draw_chips(surface, wd, x, y, w, mouse)
                 else:
                     y = self._draw_check(surface, wd, x, y, w, mouse)
         if self.button_label:
@@ -277,6 +365,44 @@ class SidePanel:
         pygame.draw.rect(surface, BUTTON_HOT, fill, border_radius=3)
         pygame.draw.circle(surface, ACCENT, (knob_x, s.rect.centery), 7)
         return y + ROW_SLIDER
+
+    def _draw_range(self, surface, r: Range, x, y, w) -> int:
+        fg = PANEL_MUTED if r.enabled else BUTTON
+        self._blit(surface, r.label, x, y, self.small, fg)
+        val = self.small.render(r.text(), True, PANEL_FG if r.enabled else PANEL_MUTED)
+        surface.blit(val, (x + w - val.get_width(), y))
+        r.rect = pygame.Rect(x + 4, y + 20, w - 8, 6)
+        pygame.draw.rect(surface, BUTTON, r.rect, border_radius=3)
+        a, b = (r.x_of(v) for v in r.value)
+        pygame.draw.rect(surface, BUTTON_HOT, pygame.Rect(a, r.rect.y, max(2, b - a), r.rect.height), border_radius=3)
+        for kx in (a, b):
+            pygame.draw.circle(surface, ACCENT if r.enabled else BUTTON, (kx, r.rect.centery), 7)
+        return y + ROW_SLIDER
+
+    def _draw_chips(self, surface, c: Chips, x, y, w, mouse) -> int:
+        self._blit(surface, c.label, x, y, self.small, PANEL_MUTED if c.enabled else BUTTON)
+        y += self.small.get_linesize() + 2
+        cx = x
+        c.rects = []
+        for option in c.options:
+            text = c.shown(option)
+            tw = self.small.size(text)[0] + 16
+            if cx + tw > x + w and cx > x:
+                cx = x
+                y += CHIP_H + 4
+            rect = pygame.Rect(cx, y, tw, CHIP_H)
+            on = option in c.selected
+            hot = c.enabled and rect.collidepoint(mouse)
+            color = TOGGLE_ON if on else (BUTTON_HOT if hot else BUTTON)
+            if not c.enabled:
+                color = BUTTON_DISABLED
+            pygame.draw.rect(surface, color, rect, border_radius=CHIP_H // 2)
+            if hot:
+                pygame.draw.rect(surface, ACCENT, rect, 1, border_radius=CHIP_H // 2)
+            self._blit_center(surface, text, rect, self.small, PANEL_FG if on else PANEL_MUTED)
+            c.rects.append((rect, option))
+            cx += tw + 5
+        return y + CHIP_H + 6
 
     def _draw_check(self, surface, c: Check, x, y, w, mouse) -> int:
         c.rect = pygame.Rect(x, y, w, ROW_CHECK - 2)

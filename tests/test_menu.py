@@ -186,3 +186,93 @@ def test_badges_and_wrap():
     font = pygame.font.Font(None, 18)
     lines = wrap("one two three four five six seven eight nine ten", font, 60)
     assert len(lines) > 1 and all(font.size(ln)[0] <= 60 or " " not in ln for ln in lines)
+
+
+def test_benchmark_tab_inline_run_and_results(tmp_path, monkeypatch):
+    from swarmpathfinding.bench import runner as R
+
+    monkeypatch.setattr(R, "OUT_DIR", tmp_path)
+    app = _app()
+    app.open_menu(tab=2)
+    tab = app.menu.benchmark
+    tab.form.get("n_scenarios").value = 5
+    tab.form.get("time_limit").value = 10
+    tab.form.get("agents").value = (1, 3)
+    app.draw()
+    spec = tab.spec()
+    runner = R.BenchmarkRunner(spec, mode="inline", out_dir=tmp_path)
+    app.menu.start_benchmark(runner, "headless")
+    assert app.menu.is_open
+    while runner.running:
+        app.tick(1 / 60)
+    for t in range(4):
+        app.menu.tab = t
+        app.draw()
+    res = app.menu.results
+    assert res.rows()
+    _click(app, res._random_rect.center)
+    assert not app.menu.is_open
+    assert app.sim.config.seed in {c.seed for c in spec.scenarios()}
+
+
+def test_visual_benchmark_drives_the_live_view():
+    from swarmpathfinding.bench.experiment import ExperimentSpec
+    from swarmpathfinding.bench.runner import BenchmarkRunner
+
+    app = _app()
+    app.open_menu(tab=2)
+    spec = ExperimentSpec(n_scenarios=2, agents=(1, 2), time_limit=5)
+    app.menu.start_benchmark(BenchmarkRunner(spec, mode="visual", out_dir=None), "max")
+    assert not app.menu.is_open and not app.paused
+    assert app.visual_bench_active()
+    for _ in range(400):
+        app.tick(1 / 60)
+        if not app.visual_bench_active():
+            break
+    app.draw()
+    assert app.menu.runner.finished
+
+
+def test_visual_benchmark_esc_cancels_not_quits():
+    from swarmpathfinding.bench.experiment import ExperimentSpec
+    from swarmpathfinding.bench.runner import BenchmarkRunner
+
+    app = _app()
+    spec = ExperimentSpec(n_scenarios=3, time_limit=5)
+    app.menu.start_benchmark(BenchmarkRunner(spec, mode="visual", out_dir=None), "x4")
+    app.tick(1 / 60)
+    assert app.handle(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE)) is True
+    assert app.menu.runner.cancelled
+
+
+def test_load_random_scenario_from_benchmark_settings():
+    app = _app()
+    app.open_menu(tab=2)
+    tab = app.menu.benchmark
+    tab.form.get("worlds").selected = {"continuous"}
+    tab._sync()
+    app.draw()
+    _click(app, tab._random_rect.center)
+    assert not app.menu.is_open
+    assert app.sim.config.world_kind == "continuous"
+    assert app.panel.get("world_kind").value == "continuous"
+
+
+def test_chips_and_range_widgets():
+    app = _app()
+    app.open_menu(tab=2)
+    app.draw()
+    form = app.menu.benchmark.form
+    chips = form.get("worlds")
+    rect, opt = next(r for r in chips.rects if r[1] == "continuous")
+    _click(app, rect.center)
+    assert "continuous" in chips.value
+    form._scroll_by(10_000)  # the ranges sit below the fold
+    app.draw()
+    rng = form.get("agents")
+    assert form.rect.collidepoint(rng.rect.center)
+    app.handle(pygame.event.Event(pygame.MOUSEBUTTONDOWN, pos=(rng.rect.right, rng.rect.centery), button=1))
+    app.handle(pygame.event.Event(pygame.MOUSEMOTION, pos=(rng.rect.centerx, rng.rect.centery), rel=(0, 0), buttons=(1, 0, 0)))
+    app.handle(pygame.event.Event(pygame.MOUSEBUTTONUP, pos=(rng.rect.centerx, rng.rect.centery), button=1))
+    lo, hi = rng.value
+    assert lo == 1 and 40 < hi < 60
