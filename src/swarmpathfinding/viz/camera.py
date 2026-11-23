@@ -19,6 +19,13 @@ class Camera:
         sy = self.viewport.bottom - (point.y - self.y) * self.zoom
         return int(sx), int(sy)
 
+    def local(self, point: Vec2) -> tuple[int, int]:
+        """Pixel position relative to the viewport's top-left corner, for drawing
+        on a subsurface of the viewport."""
+        sx = (point.x - self.x) * self.zoom
+        sy = self.viewport.height - (point.y - self.y) * self.zoom
+        return int(sx), int(sy)
+
     def screen_to_world(self, sx: int, sy: int) -> Vec2:
         x = (sx - self.viewport.x) / self.zoom + self.x
         y = (self.viewport.bottom - sy) / self.zoom + self.y

@@ -79,7 +79,11 @@ With fog of war on, the view shows what the swarm remembers, not the truth: unkn
 
 Notebooks are **launchers**, not a second UI. `launch_lab(...)` blocks the kernel until you close Pygame. Use the **SwarmPathfinding** kernel (the project `.venv`).
 
-Planners: `weighted_a_star` (8-connected A\* on the last-seen map, f = g + w·h; `w` = 1 is optimal, larger `w` expands fewer cells for a path at most `w` times longer; continuous worlds are searched on a rasterised map with obstacles inflated by the agent radius), plus the stubs `none` and `straight_line` (succeeds only if the last-seen map allows a straight shot). Each agent plans its own route; unknown cells count as free.
+Planners: the **A\* family** on an 8-connected grid (one search, different priorities): `dijkstra` (f = g), `a_star` (f = g + h, octile h), `greedy_best_first` (f = h) and `weighted_a_star` (f = g + w·h; larger `w` expands fewer cells for a path at most `w` times longer). Continuous worlds are searched on a rasterised map with obstacles inflated by the agent radius. Plus the stubs `none` and `straight_line`. Each agent plans its own route; unknown cells count as free.
+
+**Watching a search.** Tick **Show search** to see agent 0's search. The **Search** section adds a g / h / f heatmap, the open set (frontier, green), the closed set (expanded, purple), parent arrows (zoom in) and a cell inspector (hover a cell for g, h, f, its parent and when it was expanded). The bar along the bottom replays the search: start, step back, play / pause, step, end, speed and a scrubber. Keys: **P** play / pause, **Left / Right** one expansion (Shift: 10), **Home / End**. Replaying pauses the simulation.
+
+**Compare panes.** In the menu's Scenario tab tick **compare** on 2 to 4 planners and Apply: each gets its own pane on the same scenario and seed, with one camera, edits and goal clicks applied to every pane, and a metrics strip underneath. The replay bar steps every pane in lock-step by expansion count, so you can watch Dijkstra flood while A\* aims. **C** goes back to one pane.
 
 Scenario packs (density, spawn layout, slow-edit, FOW, movers):
 

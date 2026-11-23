@@ -154,7 +154,7 @@ def test_planners_filter_designed_for():
     app.open_menu(tab=1)
     tab = app.menu.planners
     tab.filter.index = tab.filter.options.index("grid")
-    assert tab.planners() == ["weighted_a_star"]
+    assert {"a_star", "dijkstra", "greedy_best_first", "weighted_a_star"} <= set(tab.planners())
     tab.filter.index = tab.filter.options.index("movers")
     assert tab.planners() == []
     app.draw()

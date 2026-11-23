@@ -25,13 +25,19 @@ class SearchTrace:
     ys: list[int] = field(default_factory=list)
     g: list[float] = field(default_factory=list)
     f: list[float] = field(default_factory=list)
+    h: list[float] = field(default_factory=list)  # unweighted heuristic
+    px: list[int] = field(default_factory=list)  # parent cell (-1 = none)
+    py: list[int] = field(default_factory=list)
 
-    def add(self, kind: int, x: int, y: int, g: float, f: float) -> None:
+    def add(self, kind: int, x: int, y: int, g: float, f: float, h: float = float("nan"), px: int = -1, py: int = -1) -> None:
         self.kinds.append(kind)
         self.xs.append(x)
         self.ys.append(y)
         self.g.append(g)
         self.f.append(f)
+        self.h.append(h)
+        self.px.append(px)
+        self.py.append(py)
 
     def __len__(self) -> int:
         return len(self.kinds)
