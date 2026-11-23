@@ -30,6 +30,9 @@ class SearchTrace:
     h: list[float] = field(default_factory=list)  # unweighted heuristic
     px: list[int] = field(default_factory=list)  # parent cell (-1 = none)
     py: list[int] = field(default_factory=list)
+    # Incremental planners: the g field they started this call with (NaN =
+    # unknown), so a replay shows the retained tree under the repair work.
+    base_g: np.ndarray | None = None
 
     def add(self, kind: int, x: int, y: int, g: float, f: float, h: float = float("nan"), px: int = -1, py: int = -1) -> None:
         self.kinds.append(kind)
