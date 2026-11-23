@@ -48,7 +48,7 @@ from swarmpathfinding.viz.colors import (
 )
 from swarmpathfinding.viz.panel import Check, Cycle, SidePanel, Slider
 
-TABS = ("Scenario", "Planners")
+TABS = ("Scenario", "Planners", "Benchmark", "Results")
 FIT_LABEL = {Fit.DESIGNED: "designed for it", Fit.OK: "works as is", Fit.ADAPTED: "adapted", Fit.CANNOT: "cannot run"}
 FIT_COLOR = {Fit.DESIGNED: FIT_DESIGNED, Fit.OK: FIT_OK, Fit.ADAPTED: FIT_ADAPTED, Fit.CANNOT: FIT_CANNOT}
 # Short matrix column headers, in TRAITS order.
@@ -548,10 +548,26 @@ class MenuOverlay:
         self.scenario = ScenarioTab(self)
         self.planners = PlannersTab(self)
         self.on_close: Callable[[], None] | None = None
+        # benchmark state lives here so it survives closing the menu
+        self.runner = None  # BenchmarkRunner | None
+        self.on_bench_start: Callable[[Any, str], None] | None = None
+        self.toast = ""  # one-line note the live view shows after the menu closes
+        from swarmpathfinding.viz.menu_bench import BenchmarkTab, ResultsTab
+
+        self.benchmark = BenchmarkTab(self)
+        self.results = ResultsTab(self)
+
+    def start_benchmark(self, runner, mode: str) -> None:
+        """mode: 'headless' or a visual speed ('x4', 'x16', 'max')."""
+        if self.runner is not None and self.runner.running:
+            self.runner.cancel()
+        self.runner = runner
+        if self.on_bench_start:
+            self.on_bench_start(runner, mode)
 
     @property
     def tabs(self) -> list:
-        return [self.scenario, self.planners]
+        return [self.scenario, self.planners, self.benchmark, self.results]
 
     def open(self, tab: int | None = None) -> None:
         cfg = self.current_config()
@@ -634,7 +650,20 @@ class MenuOverlay:
         pygame.draw.line(surface, PANEL_FG, (c[0] - 6, c[1] + 6), (c[0] + 6, c[1] - 6), 2)
         pygame.draw.line(surface, CARD_EDGE, (card.x, card.y + 50), (card.right, card.y + 50), 1)
 
-        area = pygame.Rect(card.x + 20, card.y + 60, card.width - 40, card.height - 74)
+        footer = 0
+        if self.runner is not None and self.tab != 2:
+            footer = 34
+            from swarmpathfinding.viz.menu_bench import gradient_bar
+
+            p = self.runner.progress
+            fy = card.bottom - 30
+            pygame.draw.line(surface, CARD_EDGE, (card.x, fy - 6), (card.right, fy - 6), 1)
+            state = "done" if self.runner.finished else ("cancelled" if self.runner.cancelled else ("paused" if self.runner.paused else "running"))
+            label = self.small.render(f"Benchmark {state}", True, PANEL_MUTED)
+            surface.blit(label, (card.x + 20, fy + 2))
+            bar = pygame.Rect(card.x + 40 + label.get_width(), fy, card.width - 80 - label.get_width(), 20)
+            gradient_bar(surface, bar, p.fraction, self.small, f"{p.done}/{p.total}", dim=self.runner.paused)
+        area = pygame.Rect(card.x + 20, card.y + 60, card.width - 40, card.height - 74 - footer)
         prev = surface.get_clip()
         surface.set_clip(area.inflate(4, 4))
         self.tabs[self.tab].draw(surface, area, mouse)
