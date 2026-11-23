@@ -394,6 +394,8 @@ class LiveApp:
             self.compare_sims = [Simulation(cfg.with_(planner=p)) for p in planners[1:]]
             for sim in self.compare_sims:
                 sim.record_focus_trace = self.sim.record_focus_trace
+                if sim.record_focus_trace:
+                    sim.replan_all(sync=True)
         self.players = [SearchPlayer() for _ in self.panes]
         self._sync_panel_state()
         self._layout()

@@ -13,7 +13,7 @@ import numpy as np
 import pygame
 
 from swarmpathfinding.core.geom import Vec2
-from swarmpathfinding.core.trace import EXPAND, PUSH, UPDATE, SearchTrace
+from swarmpathfinding.core.trace import EXPAND, LOS, PUSH, SCAN, UPDATE, SearchTrace
 from swarmpathfinding.viz.camera import Camera
 from swarmpathfinding.viz.colors import (
     ACCENT,
@@ -27,10 +27,13 @@ from swarmpathfinding.viz.colors import (
     SEARCH_CURRENT,
     SEARCH_OPEN,
     SEARCH_PARENT,
+    SEARCH_SCAN,
+    LOS_BLOCKED,
+    LOS_CLEAR,
 )
 from swarmpathfinding.viz.draw import blit_cells
 
-UNSEEN, OPEN, CLOSED = 0, 1, 2
+UNSEEN, OPEN, CLOSED, SCANNED = 0, 1, 2, 3
 SPEEDS = (5, 20, 100, 500, 2000)  # expansions per second
 HEATMAPS = ("off", "g", "h", "f")
 
@@ -58,6 +61,7 @@ class SearchPlayer:
         self.speed_index = 1
         self._acc = 0.0
         self.frozen = False  # True while replaying: newer searches don't replace this one
+        self._total_exp: tuple | None = None
         self._alloc((0, 0))
 
     # ------------------------------------------------------------ state
@@ -72,6 +76,10 @@ class SearchPlayer:
         self.order = np.full(shape, -1, dtype=np.int32)
         self.expanded = 0
         self.current: tuple[int, int] | None = None
+        self.scanned = 0
+        self.los_tests = 0
+        # line-of-sight tests since the last expansion: (x0, y0, x1, y1, clear)
+        self.los: list[tuple[int, int, int, int, bool]] = []
         self.n = 0
 
     @property
@@ -82,7 +90,9 @@ class SearchPlayer:
     def total_expansions(self) -> int:
         if self.trace is None:
             return 0
-        return sum(1 for k in self.trace.kinds if k == EXPAND)
+        if self._total_exp is None or self._total_exp[0] is not self.trace:
+            self._total_exp = (self.trace, sum(1 for k in self.trace.kinds if k == EXPAND))
+        return self._total_exp[1]
 
     @property
     def at_end(self) -> bool:
@@ -112,11 +122,21 @@ class SearchPlayer:
         k, x, y = tr.kinds[i], tr.xs[i], tr.ys[i]
         if not (0 <= y < self.shape[0] and 0 <= x < self.shape[1]):
             return
+        if k == SCAN:
+            self.scanned += 1
+            if self.state[y, x] == UNSEEN:
+                self.state[y, x] = SCANNED
+            return
+        if k == LOS:
+            self.los_tests += 1
+            self.los.append((tr.px[i], tr.py[i], x, y, tr.g[i] > 0.5))
+            return
         if k == EXPAND:
             self.state[y, x] = CLOSED
             self.order[y, x] = self.expanded
             self.expanded += 1
             self.current = (x, y)
+            self.los = []
         elif k == PUSH and self.state[y, x] != CLOSED:
             self.state[y, x] = OPEN
         if k in (PUSH, UPDATE, EXPAND):
@@ -195,8 +215,8 @@ class SearchPlayer:
         if not (0 <= y < self.shape[0] and 0 <= x < self.shape[1]):
             return None
         st = int(self.state[y, x])
-        rows = [("cell", f"({x}, {y})"), ("state", ("not reached", "open", "closed")[st])]
-        if st:
+        rows = [("cell", f"({x}, {y})"), ("state", ("not reached", "open", "closed", "scanned")[st])]
+        if st in (OPEN, CLOSED):
             rows += [("g", _f(self.g[y, x])), ("h", _f(self.h[y, x])), ("f", _f(self.f[y, x]))]
             px, py = self.parent[y, x]
             rows.append(("parent", f"({px}, {py})" if px >= 0 else "start"))
@@ -228,7 +248,7 @@ def draw_search_state(
     rgba = np.zeros((*st.shape, 4), dtype=np.uint8)
     if heatmap in ("g", "h", "f"):
         vals = getattr(player, heatmap)
-        mask = (st > 0) & ~np.isnan(vals)
+        mask = ((st == OPEN) | (st == CLOSED)) & ~np.isnan(vals)
         if mask.any():
             lo, hi = float(np.nanmin(vals[mask])), float(np.nanmax(vals[mask]))
             t = (vals - lo) / max(1e-9, hi - lo)
@@ -236,6 +256,7 @@ def draw_search_state(
             rgba[mask, :3] = rgb[mask].astype(np.uint8)
             rgba[mask, 3] = 170
     else:
+        rgba[st == SCANNED] = SEARCH_SCAN
         if show_closed:
             rgba[st == CLOSED] = SEARCH
         if show_open:
@@ -247,6 +268,10 @@ def draw_search_state(
     px_per_cell = camera.zoom * cell_size
     if arrows and px_per_cell >= 7:
         _draw_arrows(surface, camera, player, cell_size)
+    for x0, y0, x1, y1, clear in player.los:
+        a = camera.local(Vec2((x0 + 0.5) * cell_size, (y0 + 0.5) * cell_size))
+        b = camera.local(Vec2((x1 + 0.5) * cell_size, (y1 + 0.5) * cell_size))
+        pygame.draw.line(surface, LOS_CLEAR if clear else LOS_BLOCKED, a, b, 2)
     if player.current is not None:
         cx, cy = player.current
         center = camera.local(Vec2((cx + 0.5) * cell_size, (cy + 0.5) * cell_size))
@@ -262,15 +287,17 @@ def _draw_arrows(surface, camera: Camera, player: SearchPlayer, cell_size: float
     x0, x1 = max(0, int(tl.x / cell_size)), min(w, int(br.x / cell_size) + 1)
     y0, y1 = max(0, int(br.y / cell_size)), min(h, int(tl.y / cell_size) + 1)
     sub = player.state[y0:y1, x0:x1]
-    ys, xs = np.nonzero(sub)
+    ys, xs = np.nonzero((sub == OPEN) | (sub == CLOSED))
     if len(xs) > 6000:
         return
     for yy, xx in zip(ys + y0, xs + x0):
         px, py = player.parent[yy, xx]
         if px < 0:
             continue
+        # neighbours: a short arrow; far parents (JPS, Theta*): the whole edge
+        frac = 0.6 if abs(px - xx) <= 1 and abs(py - yy) <= 1 else 1.0
         a = camera.local(Vec2((xx + 0.5) * cell_size, (yy + 0.5) * cell_size))
-        b = camera.local(Vec2((xx + 0.5 + (px - xx) * 0.6) * cell_size, (yy + 0.5 + (py - yy) * 0.6) * cell_size))
+        b = camera.local(Vec2((xx + 0.5 + (px - xx) * frac) * cell_size, (yy + 0.5 + (py - yy) * frac) * cell_size))
         pygame.draw.line(surface, SEARCH_PARENT, a, b, 1)
         pygame.draw.circle(surface, SEARCH_PARENT, b, 2)
 
@@ -333,6 +360,10 @@ class SearchBar:
         surface.blit(img, img.get_rect(center=sp.center))
         self.buttons["speed"] = sp
         info = f"{title}: expansion {player.expanded}/{player.total_expansions}"
+        if player.scanned:
+            info += f", {player.scanned} scanned"
+        if player.los_tests:
+            info += f", {player.los_tests} sight tests"
         info_img = self.font.render(info, True, PANEL_FG)
         info_w = info_img.get_width()
         self.track = pygame.Rect(sp.right + 12, r.centery - 3, max(40, r.right - sp.right - 24 - info_w - 12), 6)

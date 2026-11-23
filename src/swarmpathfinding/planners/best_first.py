@@ -61,6 +61,20 @@ class GridBestFirst(BasePathfinder):
         """(weight of g, weight of h) in f."""
         return 1.0, 1.0
 
+    def search(
+        self,
+        blocked: np.ndarray,
+        start: Cell,
+        goal: Cell,
+        budget: Budget | None,
+        max_expansions: int | None,
+        trace: SearchTrace | None,
+    ) -> tuple[list[Cell] | None, int, np.ndarray]:
+        """Cells of the route (consecutive cells may be far apart, the segments
+        between them are free), expansions, and the closed mask."""
+        gw, hw = self.weights(budget)
+        return best_first_search(blocked, start, goal, gw, hw, max_expansions, trace)
+
     def plan(
         self,
         belief: Any,
@@ -71,7 +85,6 @@ class GridBestFirst(BasePathfinder):
         if not starts or not isinstance(belief, BeliefMap):
             return PathResult(success=False)
         t0 = time.perf_counter()
-        gw, hw = self.weights(budget)
         grid = plan_grid(belief, self.agent_radius, self.resolution)
         start = starts[0]
         s_cell = grid.to_cell(start)
@@ -86,7 +99,8 @@ class GridBestFirst(BasePathfinder):
             return PathResult(path=(start,), success=False, runtime_ms=_ms(t0))
         max_exp = budget.max_expansions if budget is not None else None
         trace = SearchTrace(cell_size=grid.cell_size) if budget is not None and budget.record_trace else None
-        cells, expansions, closed = best_first_search(blocked, s_cell, g_cell, gw, hw, max_exp, trace)
+        cells, expansions, closed = self.search(blocked, s_cell, g_cell, budget, max_exp, trace)
+        gw, hw = self.weights(budget)
         extra = {"closed": closed, "cell_size": grid.cell_size, "weight": hw, "g_weight": gw}
         if trace is not None:
             extra["trace"] = trace
