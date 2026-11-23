@@ -1,3 +1,6 @@
+"""The A* family on an 8-connected grid: Dijkstra, A*, greedy best-first and
+weighted A*. One search, different weights of g and h in f."""
+
 from __future__ import annotations
 
 import heapq
@@ -8,7 +11,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from swarmpathfinding.core.belief import BeliefMap
-from swarmpathfinding.core.capabilities import adapted, designed
+from swarmpathfinding.core.capabilities import Fit, Rating, adapted, designed
 from swarmpathfinding.core.geom import Cell, Vec2
 from swarmpathfinding.core.plan_grid import plan_grid
 from swarmpathfinding.core.protocols import BasePathfinder
@@ -29,23 +32,14 @@ _MOVES = (
 )
 
 
-@register("weighted_a_star")
-class WeightedAStarPlanner(BasePathfinder):
-    """8-connected weighted A* on the shared last-seen map.
+class GridBestFirst(BasePathfinder):
+    """Shared plumbing for the A* family: plans on the last-seen map
+    (continuous worlds on an inflated raster) with `best_first_search`.
+    Subclasses only choose the weights of g and h."""
 
-    f = g + w * h with the octile heuristic. w = 1 is plain, optimal A*.
-    w > 1 expands fewer cells and returns a path at most w times the optimum
-    (no corner cutting, no re-opening of closed cells).
-    Continuous worlds are searched on a rasterised configuration space
-    (obstacles inflated by the agent radius), so paths follow cell centres.
-    """
-
-    name = "weighted_a_star"
-    uses_weight = True
-    params = (("w", "heuristic weight", 1.0, 3.0),)
-    overlays = ("closed set (Show search)",)
-    label = "weighted A*"
-    summary = "Best-first grid search on f = g + w*h. w = 1 is optimal A*; larger w is faster but up to w times longer."
+    uses_weight = False
+    records_trace = True  # fills Budget.record_trace requests (step-through replay)
+    overlays = ("open / closed sets", "current cell", "parent arrows", "g / h / f heatmap", "step-through replay", "cell inspector")
     capabilities = {
         ("world", "grid"): designed(),
         ("world", "continuous"): adapted("searches a 0.5-unit raster with obstacles inflated by the agent radius"),
@@ -63,6 +57,10 @@ class WeightedAStarPlanner(BasePathfinder):
         self.agent_radius = agent_radius
         self.resolution = resolution
 
+    def weights(self, budget: Budget | None) -> tuple[float, float]:
+        """(weight of g, weight of h) in f."""
+        return 1.0, 1.0
+
     def plan(
         self,
         belief: Any,
@@ -73,7 +71,7 @@ class WeightedAStarPlanner(BasePathfinder):
         if not starts or not isinstance(belief, BeliefMap):
             return PathResult(success=False)
         t0 = time.perf_counter()
-        w = max(1.0, budget.weight if budget is not None else self.weight)
+        gw, hw = self.weights(budget)
         grid = plan_grid(belief, self.agent_radius, self.resolution)
         start = starts[0]
         s_cell = grid.to_cell(start)
@@ -88,8 +86,8 @@ class WeightedAStarPlanner(BasePathfinder):
             return PathResult(path=(start,), success=False, runtime_ms=_ms(t0))
         max_exp = budget.max_expansions if budget is not None else None
         trace = SearchTrace(cell_size=grid.cell_size) if budget is not None and budget.record_trace else None
-        cells, expansions, closed = _search(blocked, s_cell, g_cell, w, max_exp, trace)
-        extra = {"closed": closed, "cell_size": grid.cell_size, "weight": w}
+        cells, expansions, closed = best_first_search(blocked, s_cell, g_cell, gw, hw, max_exp, trace)
+        extra = {"closed": closed, "cell_size": grid.cell_size, "weight": hw, "g_weight": gw}
         if trace is not None:
             extra["trace"] = trace
         if cells is None:
@@ -112,18 +110,71 @@ class WeightedAStarPlanner(BasePathfinder):
         )
 
 
+
+
+@register("dijkstra")
+class DijkstraPlanner(GridBestFirst):
+    """Uniform-cost search: f = g. Optimal, explores in rings around the start."""
+
+    label = "Dijkstra"
+    summary = "Expands cells in order of distance from the start (f = g, no heuristic). Optimal, but searches in every direction."
+    capabilities = {**GridBestFirst.capabilities, ("agents", "single"): Rating(Fit.OK)}
+
+    def weights(self, budget: Budget | None) -> tuple[float, float]:
+        return 1.0, 0.0
+
+
+@register("a_star")
+class AStarPlanner(GridBestFirst):
+    """A*: f = g + h with the admissible octile heuristic. Optimal."""
+
+    label = "A*"
+    summary = "Expands the cell with the lowest f = g + h (octile distance to the goal). Optimal, and aims the search at the goal."
+
+
+@register("greedy_best_first")
+class GreedyBestFirstPlanner(GridBestFirst):
+    """Greedy best-first: f = h. Fast, not optimal, can be lured into dead ends."""
+
+    label = "greedy best-first"
+    summary = "Always expands the cell that looks closest to the goal (f = h, ignores the cost so far). Very fast in open maps, paths can be long."
+
+    def weights(self, budget: Budget | None) -> tuple[float, float]:
+        return 0.0, 1.0
+
+
+@register("weighted_a_star")
+class WeightedAStarPlanner(GridBestFirst):
+    """f = g + w * h. w = 1 is A*; w > 1 expands fewer cells and returns a path
+    at most w times the optimum."""
+
+    uses_weight = True
+    params = (("w", "heuristic weight", 1.0, 3.0),)
+    label = "weighted A*"
+    summary = "Best-first grid search on f = g + w*h. w = 1 is optimal A*; larger w is faster but up to w times longer."
+
+    def weights(self, budget: Budget | None) -> tuple[float, float]:
+        return 1.0, max(1.0, budget.weight if budget is not None else self.weight)
+
+
 def _ms(t0: float) -> float:
     return (time.perf_counter() - t0) * 1000.0
 
 
-def _search(
+def best_first_search(
     blocked: np.ndarray,
     start: Cell,
     goal: Cell,
-    w: float,
+    g_weight: float,
+    h_weight: float,
     max_expansions: int | None,
     trace: SearchTrace | None = None,
 ) -> tuple[list[Cell] | None, int, np.ndarray]:
+    """8-connected best-first search ordered by f = g_weight * g + h_weight * h
+    (octile h, no corner cutting, closed cells are never reopened).
+
+    (1, 0) Dijkstra, (1, 1) A*, (1, w) weighted A*, (0, 1) greedy best-first.
+    Ties on f go to the larger g (deeper first), then to insertion order."""
     h, width = blocked.shape
     flat_blocked = blocked.ravel().tolist()
     n = h * width
@@ -136,25 +187,28 @@ def _search(
     gx, gy = goal.x, goal.y
     k = SQRT2 - 1.0
 
-    def heur(x: int, y: int) -> float:
+    def octile(x: int, y: int) -> float:
         dx = abs(x - gx)
         dy = abs(y - gy)
-        return w * (max(dx, dy) + k * min(dx, dy))
+        return max(dx, dy) + k * min(dx, dy)
 
     g[s] = 0.0
-    heap = [(heur(start.x, start.y), 0.0, s)]
+    h0 = octile(start.x, start.y)
+    heap = [(h_weight * h0, 0.0, 0, s)]
+    counter = 1
     if trace is not None:
-        trace.add(PUSH, start.x, start.y, 0.0, heap[0][0])
+        trace.add(PUSH, start.x, start.y, 0.0, heap[0][0], h0)
     expansions = 0
     found = False
     while heap:
-        fc, gc, cur = heapq.heappop(heap)
+        fc, neg_g, _, cur = heapq.heappop(heap)
+        gc = g[cur]
         if closed[cur]:
             continue
         closed[cur] = 1
         expansions += 1
         if trace is not None:
-            trace.add(EXPAND, cur % width, cur // width, gc, fc)
+            trace.add(EXPAND, cur % width, cur // width, gc, fc, octile(cur % width, cur // width), *_xy(parent[cur], width))
         if cur == t:
             found = True
             break
@@ -175,10 +229,12 @@ def _search(
             if ng < g[nb]:
                 g[nb] = ng
                 parent[nb] = cur
-                fn = ng + heur(nx, ny)
-                heapq.heappush(heap, (fn, ng, nb))
+                hn = octile(nx, ny)
+                fn = g_weight * ng + h_weight * hn
+                heapq.heappush(heap, (fn, -ng, counter, nb))
+                counter += 1
                 if trace is not None:
-                    trace.add(PUSH, nx, ny, ng, fn)
+                    trace.add(PUSH, nx, ny, ng, fn, hn, cx, cy)
     closed_mask = np.frombuffer(bytes(closed), dtype=np.uint8).reshape(h, width).astype(bool)
     if not found:
         return None, expansions, closed_mask
@@ -190,3 +246,9 @@ def _search(
         cur = parent[cur]
     out.reverse()
     return out, expansions, closed_mask
+
+
+def _xy(index: int, width: int) -> tuple[int, int]:
+    if index < 0:
+        return -1, -1
+    return index % width, index // width

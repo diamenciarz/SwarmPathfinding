@@ -56,12 +56,12 @@ def blit_cells(surface: pygame.Surface, camera: Camera, rgba: np.ndarray, cell_s
         return
     sub = np.ascontiguousarray(rgba[y0:y1, x0:x1][::-1])
     img = pygame.image.frombuffer(sub.tobytes(), (x1 - x0, y1 - y0), "RGBA")
-    sx0, sy0 = camera.world_to_screen(Vec2(x0 * cell_size, y1 * cell_size))
-    sx1, sy1 = camera.world_to_screen(Vec2(x1 * cell_size, y0 * cell_size))
+    sx0, sy0 = camera.local(Vec2(x0 * cell_size, y1 * cell_size))
+    sx1, sy1 = camera.local(Vec2(x1 * cell_size, y0 * cell_size))
     if sx1 <= sx0 or sy1 <= sy0:
         return
     img = pygame.transform.scale(img, (sx1 - sx0, sy1 - sy0))
-    surface.blit(img, (sx0 - vp.x, sy0 - vp.y))
+    surface.blit(img, (sx0, sy0))
 
 
 def _rgba(shape: tuple[int, int], color) -> np.ndarray:
@@ -107,18 +107,18 @@ def draw_grid_lines(surface: pygame.Surface, camera: Camera, world: GridWorld) -
         return
     cs = world.cell_size
     for x in range(world.width + 1):
-        a = camera.world_to_screen(Vec2(x * cs, 0))
-        b = camera.world_to_screen(Vec2(x * cs, world.height * cs))
+        a = camera.local(Vec2(x * cs, 0))
+        b = camera.local(Vec2(x * cs, world.height * cs))
         pygame.draw.line(surface, GRID_LINE, a, b, 1)
     for y in range(world.height + 1):
-        a = camera.world_to_screen(Vec2(0, y * cs))
-        b = camera.world_to_screen(Vec2(world.width * cs, y * cs))
+        a = camera.local(Vec2(0, y * cs))
+        b = camera.local(Vec2(world.width * cs, y * cs))
         pygame.draw.line(surface, GRID_LINE, a, b, 1)
 
 
 def draw_polygons(surface: pygame.Surface, camera: Camera, world: ContinuousWorld) -> None:
-    bg_tl = camera.world_to_screen(Vec2(0, world.height))
-    bg_br = camera.world_to_screen(Vec2(world.width, 0))
+    bg_tl = camera.local(Vec2(0, world.height))
+    bg_br = camera.local(Vec2(world.width, 0))
     pygame.draw.rect(
         surface,
         FLOOR,
@@ -129,8 +129,8 @@ def draw_polygons(surface: pygame.Surface, camera: Camera, world: ContinuousWorl
 
 
 def draw_floor(surface: pygame.Surface, camera: Camera, world: ContinuousWorld) -> None:
-    tl = camera.world_to_screen(Vec2(0, world.height))
-    br = camera.world_to_screen(Vec2(world.width, 0))
+    tl = camera.local(Vec2(0, world.height))
+    br = camera.local(Vec2(world.width, 0))
     pygame.draw.rect(surface, FLOOR, pygame.Rect(tl[0], tl[1], br[0] - tl[0], br[1] - tl[1]))
 
 
@@ -141,7 +141,7 @@ def draw_remembered(surface: pygame.Surface, camera: Camera, records: Iterable[O
     were seen or not; `draw_visible_truth` then paints the in-view part bright."""
     for rec in records:
         if len(rec.vertices) >= 3:
-            pygame.draw.polygon(surface, REMEMBERED_WALL, [camera.world_to_screen(v) for v in rec.vertices])
+            pygame.draw.polygon(surface, REMEMBERED_WALL, [camera.local(v) for v in rec.vertices])
 
 
 def draw_visible_truth(surface: pygame.Surface, camera: Camera, world: ContinuousWorld, union) -> None:
@@ -178,16 +178,15 @@ def draw_fog_raster(
 def draw_ghosts(surface: pygame.Surface, camera: Camera, ghosts: Iterable[ObstacleRecord]) -> None:
     """Last-seen obstacles, moved along their last-seen velocity."""
     overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-    ox, oy = camera.viewport.x, camera.viewport.y
     for ghost in ghosts:
         if len(ghost.vertices) < 3:
             continue
-        pts = [_off(camera.world_to_screen(v), ox, oy) for v in ghost.vertices]
+        pts = [camera.local(v) for v in ghost.vertices]
         pygame.draw.polygon(overlay, GHOST, pts)
         pygame.draw.polygon(overlay, GHOST_EDGE, pts, 1)
         if ghost.velocity.length_sq() > 1e-9:
-            a = _off(camera.world_to_screen(ghost.position), ox, oy)
-            b = _off(camera.world_to_screen(ghost.position + ghost.velocity), ox, oy)
+            a = camera.local(ghost.position)
+            b = camera.local(ghost.position + ghost.velocity)
             pygame.draw.line(overlay, GHOST_EDGE, a, b, 2)
     surface.blit(overlay, (0, 0))
 
@@ -205,11 +204,10 @@ def draw_vision_union(surface: pygame.Surface, camera: Camera, union) -> None:
         return
     overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
     polys = list(union.geoms) if hasattr(union, "geoms") else [union]
-    ox, oy = camera.viewport.x, camera.viewport.y
     for poly in polys:
         if poly.geom_type != "Polygon" or poly.is_empty:
             continue
-        pts = [_off(camera.world_to_screen(Vec2(x, y)), ox, oy) for x, y in poly.exterior.coords]
+        pts = [camera.local(Vec2(x, y)) for x, y in poly.exterior.coords]
         if len(pts) >= 3:
             pygame.draw.polygon(overlay, VISION, pts)
             pygame.draw.polygon(overlay, VISION_EDGE, pts, 1)
@@ -221,13 +219,13 @@ def draw_vision_union(surface: pygame.Surface, camera: Camera, union) -> None:
 
 def draw_agents(surface: pygame.Surface, camera: Camera, agents: list[Agent], focus: int | None = None) -> None:
     for agent in agents:
-        center = camera.world_to_screen(agent.pos)
+        center = camera.local(agent.pos)
         r = max(3, int(agent.radius * camera.zoom))
         if focus is not None and agent.id == focus:
             pygame.draw.circle(surface, PATH, center, r + 3, 2)
         pygame.draw.circle(surface, AGENT, center, r)
         pygame.draw.circle(surface, AGENT_OUTLINE, center, r, 1)
-        nose = camera.world_to_screen(
+        nose = camera.local(
             Vec2(
                 agent.pos.x + agent.radius * 1.6 * math.cos(agent.heading),
                 agent.pos.y + agent.radius * 1.6 * math.sin(agent.heading),
@@ -237,7 +235,7 @@ def draw_agents(surface: pygame.Surface, camera: Camera, agents: list[Agent], fo
 
 
 def draw_goal(surface: pygame.Surface, camera: Camera, goal: Vec2) -> None:
-    c = camera.world_to_screen(goal)
+    c = camera.local(goal)
     r = max(5, int(0.4 * camera.zoom))
     pygame.draw.circle(surface, GOAL, c, r)
     pygame.draw.circle(surface, (20, 20, 20), c, r, 1)
@@ -251,36 +249,31 @@ def draw_paths(
 ) -> None:
     """Every agent's remaining route faintly, the focus agent's route solid."""
     overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-    ox, oy = camera.viewport.x, camera.viewport.y
     drew = False
     for path in paths:
         if len(path) >= 2:
-            pygame.draw.lines(overlay, PATH_FAINT, False, [_off(camera.world_to_screen(p), ox, oy) for p in path], 1)
+            pygame.draw.lines(overlay, PATH_FAINT, False, [camera.local(p) for p in path], 1)
             drew = True
     if drew:
         surface.blit(overlay, (0, 0))
     if focus_path and len(focus_path) >= 2:
-        pygame.draw.lines(surface, PATH, False, [camera.world_to_screen(p) for p in focus_path], 2)
+        pygame.draw.lines(surface, PATH, False, [camera.local(p) for p in focus_path], 2)
 
 
 def draw_pending_cell(surface: pygame.Surface, camera: Camera, x: int, y: int, cell_size: float) -> None:
-    tl = camera.world_to_screen(Vec2(x * cell_size, (y + 1) * cell_size))
-    br = camera.world_to_screen(Vec2((x + 1) * cell_size, y * cell_size))
+    tl = camera.local(Vec2(x * cell_size, (y + 1) * cell_size))
+    br = camera.local(Vec2((x + 1) * cell_size, y * cell_size))
     rect = pygame.Rect(tl[0], tl[1], max(3, br[0] - tl[0]), max(3, br[1] - tl[1]))
     pygame.draw.rect(surface, PENDING_EDIT, rect.inflate(2, 2), 2)
 
 
 def draw_pending_polygon(surface: pygame.Surface, camera: Camera, polygon: Polygon) -> None:
-    pts = [camera.world_to_screen(Vec2(x, y)) for x, y in polygon.exterior.coords]
+    pts = [camera.local(Vec2(x, y)) for x, y in polygon.exterior.coords]
     if len(pts) >= 3:
         pygame.draw.polygon(surface, PENDING_EDIT, pts, 2)
 
 
 def _fill_polygon(surface: pygame.Surface, camera: Camera, polygon: Polygon, color) -> None:
-    pts = [camera.world_to_screen(Vec2(x, y)) for x, y in polygon.exterior.coords]
+    pts = [camera.local(Vec2(x, y)) for x, y in polygon.exterior.coords]
     if len(pts) >= 3:
         pygame.draw.polygon(surface, color, pts)
-
-
-def _off(p: tuple[int, int], ox: int, oy: int) -> tuple[int, int]:
-    return p[0] - ox, p[1] - oy

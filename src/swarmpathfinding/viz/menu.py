@@ -45,6 +45,7 @@ from swarmpathfinding.viz.colors import (
     PANEL_MUTED,
     ROW_HOT,
     ROW_SELECTED,
+    TOGGLE_ON,
 )
 from swarmpathfinding.viz.panel import Check, Cycle, SidePanel, Slider
 
@@ -195,7 +196,9 @@ class ScenarioTab:
         ]
         self.form.set_on_change(self._on_change)
         self.planner = "weighted_a_star"
+        self.compare: list[str] = []  # 2-4 ticked planners open compare panes
         self._rows: list[tuple[pygame.Rect, str, bool]] = []
+        self._ticks: list[tuple[pygame.Rect, str]] = []
         self._apply_rect = pygame.Rect(0, 0, 0, 0)
         self._random_rect = pygame.Rect(0, 0, 0, 0)
         self._cancel_rect = pygame.Rect(0, 0, 0, 0)
@@ -250,6 +253,19 @@ class ScenarioTab:
             runnable = [p for p in list_planners() if compatibility(p, self.traits()).runnable]
             if runnable:
                 self.planner = runnable[0]
+        self.compare = [p for p in self.compare if compatibility(p, self.traits()).runnable]
+
+    def toggle_compare(self, name: str) -> None:
+        if name in self.compare:
+            self.compare.remove(name)
+        elif len(self.compare) < 4:
+            self.compare.append(name)
+
+    def compare_list(self) -> list[str]:
+        """Planners for compare panes, the picked planner first (empty = one pane)."""
+        if len(self.compare) < 2:
+            return []
+        return sorted(self.compare, key=lambda p: p != self.planner)
 
     # ------------------------------------------------------------ events
 
@@ -269,6 +285,10 @@ class ScenarioTab:
         elif self._cancel_rect.collidepoint(event.pos):
             self.menu.close()
         else:
+            for rect, name in self._ticks:
+                if rect.collidepoint(event.pos):
+                    self.toggle_compare(name)
+                    return
             for rect, name, runnable in self._rows:
                 if runnable and rect.collidepoint(event.pos):
                     self.planner = name
@@ -276,7 +296,11 @@ class ScenarioTab:
     def apply(self) -> None:
         if not compatibility(self.planner, self.traits()).runnable:
             return
-        self.menu.on_apply({**self.values(), "planner": self.planner})
+        compare = self.compare_list()
+        if compare:
+            self.menu.on_apply({**self.values(), "planner": compare[0], "compare": compare})
+        else:
+            self.menu.on_apply({**self.values(), "planner": self.planner})
         self.menu.close()
 
     # ------------------------------------------------------------ drawing
@@ -292,7 +316,7 @@ class ScenarioTab:
         right = pygame.Rect(area.x + form_w + 22, area.y, area.width - form_w - 22, area.height - footer_h)
         y = _text(surface, "THIS SCENARIO", (right.x, right.y + 6), m.small, ACCENT) + 2
         y = self._draw_chips(surface, right.x, y, right.width) + 8
-        y = _text(surface, "PLANNERS  (click one to pick it)", (right.x, y), m.small, ACCENT) + 4
+        y = _text(surface, "PLANNERS  (click one to pick it; tick 2-4 to compare them side by side)", (right.x, y), m.small, ACCENT) + 4
         self._list_rect = pygame.Rect(right.x, y, right.width, right.bottom - y)
         self._draw_list(surface, self._list_rect, mouse)
 
@@ -301,7 +325,8 @@ class ScenarioTab:
         pygame.draw.line(surface, CARD_EDGE, (area.x, fy - 6), (area.right, fy - 6), 1)
         runnable = compatibility(self.planner, self.traits()).runnable
         self._cancel_rect = pygame.Rect(area.right - 110, fy, 110, 30)
-        label = f"Apply with {planner_label(self.planner)}  (Enter)"
+        n_cmp = len(self.compare_list())
+        label = f"Compare {n_cmp} planners side by side  (Enter)" if n_cmp else f"Apply with {planner_label(self.planner)}  (Enter)"
         aw = m.small.size(label)[0] + 32
         self._apply_rect = pygame.Rect(self._cancel_rect.x - 10 - aw, fy, aw, 30)
         self._random_rect = pygame.Rect(area.x, fy, 150, 30)
@@ -337,6 +362,7 @@ class ScenarioTab:
         prev_clip = surface.get_clip()
         surface.set_clip(area)
         self._rows = []
+        self._ticks = []
         y = area.y - self.list_scroll
         line = m.small.get_linesize()
         for name, comp in rows:
@@ -355,6 +381,16 @@ class ScenarioTab:
             _text(surface, planner_label(name), (rect.x + 34, rect.y + 6), m.font, fg)
             tag = m.small.render(FIT_LABEL[comp.fit], True, FIT_COLOR[comp.fit])
             surface.blit(tag, (rect.right - tag.get_width() - 10, rect.y + 9))
+            if comp.runnable:
+                tick = pygame.Rect(rect.right - 150 - 96, rect.y + 7, 16, 16)
+                on = name in self.compare
+                pygame.draw.rect(surface, TOGGLE_ON if on else BUTTON, tick, border_radius=3)
+                if tick.inflate(70, 8).collidepoint(mouse):
+                    pygame.draw.rect(surface, ACCENT, tick, 1, border_radius=3)
+                if on:
+                    pygame.draw.lines(surface, PANEL_FG, False, [(tick.x + 3, tick.y + 8), (tick.x + 6, tick.y + 12), (tick.x + 13, tick.y + 4)], 2)
+                surface.blit(m.small.render("compare", True, PANEL_MUTED), (tick.right + 6, tick.y))
+                self._ticks.append((pygame.Rect(tick.x - 4, tick.y - 4, 96, 24), name))
             ny = rect.y + 30
             for ln in note_lines:
                 ny = _text(surface, ln, (rect.x + 34, ny), m.small, PANEL_MUTED)
