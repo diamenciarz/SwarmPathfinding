@@ -39,6 +39,9 @@ class GridBestFirst(BasePathfinder):
 
     uses_weight = False
     records_trace = True  # fills Budget.record_trace requests (step-through replay)
+    # Continuous worlds: unblock the start cell when inflation swallowed it. Planners
+    # that share work between agents (flow fields) keep one map and step out instead.
+    frees_start = True
     overlays = ("open / closed sets", "current cell", "parent arrows", "g / h / f heatmap", "step-through replay", "cell inspector")
     capabilities = {
         ("world", "grid"): designed(),
@@ -60,6 +63,11 @@ class GridBestFirst(BasePathfinder):
     def weights(self, budget: Budget | None) -> tuple[float, float]:
         """(weight of g, weight of h) in f."""
         return 1.0, 1.0
+
+    def debug_extra(self) -> dict:
+        """Planner-specific data for its debug overlay (see `draw_overlay`)."""
+        extra, self._debug = getattr(self, "_debug", {}), {}
+        return extra
 
     def search(
         self,
@@ -93,7 +101,8 @@ class GridBestFirst(BasePathfinder):
         if belief.kind == "continuous":
             # Inflation can swallow a start/goal hugging a wall; let the search leave/enter it.
             blocked = blocked.copy()
-            blocked[s_cell.y, s_cell.x] = False
+            if self.frees_start:
+                blocked[s_cell.y, s_cell.x] = False
             blocked[g_cell.y, g_cell.x] = False
         elif blocked[g_cell.y, g_cell.x]:
             return PathResult(path=(start,), success=False, runtime_ms=_ms(t0))
@@ -102,6 +111,7 @@ class GridBestFirst(BasePathfinder):
         cells, expansions, closed = self.search(blocked, s_cell, g_cell, budget, max_exp, trace)
         gw, hw = self.weights(budget)
         extra = {"closed": closed, "cell_size": grid.cell_size, "weight": hw, "g_weight": gw}
+        extra.update(self.debug_extra())
         if trace is not None:
             extra["trace"] = trace
         if cells is None:

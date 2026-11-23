@@ -200,7 +200,10 @@ class IncrementalSearch:
         seen = {cur}
         while cur != self.source:
             best, best_v = -1, INF
+            here = self.g[cur]
             for nb, c in self.neighbours(cur):
+                if self.g[nb] >= here:
+                    continue  # strictly downhill, so the walk cannot loop
                 v = self.g[nb] + c
                 if v < best_v:
                     best, best_v = nb, v
@@ -267,6 +270,17 @@ class _IncrementalPlanner(GridBestFirst):
         expansions = eng.compute(max_expansions)
         eng.trace = None
         cells = eng.path_from_target()
+        if cells is None and reused and math.isfinite(eng.g[eng.target]):
+            # Cells still queued above the target's key can leave the greedy walk
+            # stranded; start over rather than return a false "no path".
+            aid = budget.agent_id if budget is not None else None
+            source, target = (goal, start) if self.moving_target else (start, goal)
+            eng = IncrementalSearch(blocked, source, target)
+            if aid is not None:
+                self.engines[aid] = eng
+            expansions += eng.compute(max_expansions)
+            cells = eng.path_from_target()
+            self.last_reused = False
         if cells is not None and not self.moving_target:
             cells.reverse()
         return cells, expansions, eng.closed_mask()
