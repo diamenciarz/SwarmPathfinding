@@ -628,6 +628,9 @@ class LiveApp:
             )
         elif vals["show_search"] and focus is not None and "closed" in focus.extra:
             draw_search(surface, camera, focus.extra["closed"], focus.extra["cell_size"])
+        overlay = getattr(_planner_class(sim.config.planner), "draw_overlay", None)
+        if vals["show_search"] and focus is not None and overlay is not None:
+            overlay(surface, camera, focus)  # planner-specific debug layer
         self._draw_pending(surface, camera, sim)
         if sim.union is not None:
             draw_vision_union(surface, camera, sim.union)
